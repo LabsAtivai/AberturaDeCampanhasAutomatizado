@@ -2,28 +2,17 @@ FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
-# Instala dependências de build
-RUN apk add --no-cache python3 make g++ git
-
-# Copia arquivos de configuração primeiro
 COPY package*.json ./
-COPY tsconfig*.json ./
-COPY nest-cli.json ./
+RUN npm ci
 
-# Instala dependências
-RUN npm install
+COPY . .
 
-# Copia código fonte
-COPY src ./src
+# credentials.json precisa estar dentro de backend/ (mesmo nível do package.json)
+# ele será copiado junto por este COPY . .
 
-# Build da aplicação (com flag para ignorar warnings)
-RUN npm run build || echo "Build completed with warnings"
-
-# Limpa cache npm para reduzir tamanho
-RUN npm cache clean --force
+RUN npm run build
 
 ENV NODE_ENV=production
-
 EXPOSE 3000
 
 CMD ["npm", "run", "start:prod"]

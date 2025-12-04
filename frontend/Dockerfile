@@ -3,17 +3,17 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
-RUN npm install -g @vue/cli
+RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN npm run build   # vue-cli-service build -> gera dist/
 
-# Etapa de produção
+# Etapa de runtime: servidor estático
 FROM node:20-alpine AS production
 WORKDIR /app
 
 COPY --from=build /app/dist ./dist
+
 RUN npm install -g serve
 
 EXPOSE 4173
