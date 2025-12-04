@@ -37,7 +37,13 @@
 </template>
 
 <script>
+import EmailForm from './components/EmailForm.vue';
+
 export default {
+  name: 'App',
+  components: {
+    EmailForm,
+  },
   data() {
     return {
       logoUrl:
@@ -117,6 +123,33 @@ body {
   display: flex;
   justify-content: center;
   align-items: flex-start;
+}
+
+.page-wrapper {
+  width: 100%;
+  max-width: 720px;
+}
+
+.card {
+  background: var(--ativa-gray);
+  color: #111;
+  border-radius: 12px;
+  padding: 24px 24px 28px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.card-title {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ativa-black);
+}
+
+.card-text {
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: #444;
 }
 
 .app-footer {
