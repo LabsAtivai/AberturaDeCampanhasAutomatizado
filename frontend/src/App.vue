@@ -15,11 +15,23 @@
     </header>
 
     <main class="app-main">
-      <router-view />
+      <div class="page-wrapper">
+        <section class="card">
+          <h1 class="card-title">Aberturas de campanhas</h1>
+          <p class="card-text">
+            Selecione o <strong>email Snov.io</strong> do cliente e o período desejado.
+            O sistema irá consultar as campanhas, consolidar as aberturas e gerar um
+            arquivo <strong>CSV</strong> pronto para análise.
+          </p>
+
+          <!-- Formulário principal -->
+          <EmailForm />
+        </section>
+      </div>
     </main>
 
     <footer class="app-footer">
-      <small>Ativa.ai &middot; Aberturas de Campanhas Automatizado</small>
+      <small>Ativa.ai · Aberturas de Campanhas Automatizado</small>
     </footer>
   </div>
 </template>
