@@ -1,0 +1,28 @@
+version: "3.9"
+name: aberturas-campanhas-stack
+
+networks:
+  ativaai:
+    external: true
+
+services:
+  aberturas-backend:
+    container_name: aberturas-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - ativaai
+    # se quiser persistir o CSV no host, descomente:
+    # volumes:
+    #   - ./backend/data:/usr/src/app
+
+  aberturas-frontend:
+    container_name: aberturas-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - ativaai
