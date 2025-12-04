@@ -37,16 +37,28 @@ export default {
 table {
   width: 100%;
   border-collapse: collapse;
+  background: var(--ativa-black);
+  color: var(--ativa-white);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 13px;
 }
 
-th, td {
-  padding: 10px;
-  border: 1px solid #ddd;
+th,
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   text-align: left;
 }
 
 th {
-  background-color: #42b983;
-  color: white;
+  background-color: var(--ativa-orange);
+  color: var(--ativa-white);
+  font-weight: 600;
+}
+
+tbody tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.02);
 }
 </style>
+

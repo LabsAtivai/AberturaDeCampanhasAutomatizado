@@ -1,24 +1,37 @@
 <template>
-  <div>
-    <form @submit.prevent="onSubmit">
-      <label for="email">Email Snovio:</label>
-      <select v-model="selectedEmail" required>
-        <option v-for="email in emailOptions" :key="email" :value="email">{{ email }}</option>
-      </select>
+  <div class="form-wrapper">
+    <form @submit.prevent="onSubmit" class="form">
+      <div class="form-row">
+        <label for="email">Email Snov.io</label>
+        <select v-model="selectedEmail" id="email" required>
+          <option value="" disabled>Selecione um email</option>
+          <option v-for="email in emailOptions" :key="email" :value="email">
+            {{ email }}
+          </option>
+        </select>
+      </div>
 
-      <label for="startDate">Data de Início:</label>
-      <input v-model="startDate" type="date" required />
+      <div class="form-row form-row-inline">
+        <div class="form-field">
+          <label for="startDate">Data de início</label>
+          <input v-model="startDate" id="startDate" type="date" required />
+        </div>
 
-      <label for="endDate">Data de Fim:</label>
-      <input v-model="endDate" type="date" required />
+        <div class="form-field">
+          <label for="endDate">Data de fim</label>
+          <input v-model="endDate" id="endDate" type="date" required />
+        </div>
+      </div>
 
-      <button type="submit">Gerar Relatório</button>
+      <button type="submit" class="btn-primary">
+        Gerar relatório CSV
+      </button>
     </form>
   </div>
 </template>
 
 <script>
-import axios from 'axios';
+import api from '../api'; // conforme combinamos antes
 
 export default {
   data() {
@@ -30,24 +43,25 @@ export default {
     };
   },
   async mounted() {
-    const res = await axios.get('http://localhost:3000/api/campaigns/get-emails');
-    this.emailOptions = res.data;
+    try {
+      const res = await api.get('/api/campaigns/get-emails');
+      this.emailOptions = res.data;
+    } catch (e) {
+      console.error('Erro ao carregar emails:', e);
+    }
   },
   methods: {
     async onSubmit() {
       try {
-        // 1) Gera o CSV no backend
-        await axios.post('http://localhost:3000/api/campaigns', {
+        await api.post('/api/campaigns', {
           emailSnovio: this.selectedEmail,
           startDate: this.startDate,
           endDate: this.endDate,
         });
 
-        // 2) Faz o download
-        const response = await axios.get(
-          'http://localhost:3000/api/campaigns/download',
-          { responseType: 'blob' },
-        );
+        const response = await api.get('/api/campaigns/download', {
+          responseType: 'blob',
+        });
 
         const blob = new Blob([response.data], {
           type: 'text/csv;charset=utf-8;',
@@ -70,34 +84,87 @@ export default {
 </script>
 
 <style scoped>
-/* Estilos do formulário */
-form {
+.form-wrapper {
+  margin-top: 4px;
+}
+
+.form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-row-inline {
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.form-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 label {
-  font-weight: bold;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
 }
 
 select,
 input {
-  padding: 8px;
-  margin-top: 5px;
-  border-radius: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #d0d0d0;
+  font-size: 14px;
+  outline: none;
 }
 
-button {
-  margin-top: 20px;
-  padding: 10px;
-  background-color: #42b983;
-  color: white;
+select:focus,
+input:focus {
+  border-color: var(--ativa-orange);
+  box-shadow: 0 0 0 2px rgba(255, 122, 0, 0.2);
+}
+
+.btn-primary {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 10px 18px;
+  border-radius: 999px;
   border: none;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  background: var(--ativa-orange);
+  color: var(--ativa-white);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.08s ease, box-shadow 0.12s ease, background 0.12s ease;
 }
 
-button:hover {
-  background-color: #388e73;
+.btn-primary:hover {
+  background: #ff8f26;
+  box-shadow: 0 8px 20px rgba(255, 122, 0, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+@media (max-width: 640px) {
+  .form-row-inline {
+    flex-direction: column;
+  }
 }
 </style>

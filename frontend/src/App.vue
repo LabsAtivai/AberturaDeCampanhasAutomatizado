@@ -1,74 +1,118 @@
 <template>
-  <div id="app">
-    <header>
-      <h1>Automação de Aberturas de Campanhas</h1>
+  <div id="app" class="app">
+    <header class="app-header">
+      <div class="app-header-left">
+        <img
+          class="app-logo"
+          :src="logoUrl"
+          alt="Ativa.ai"
+        />
+        <div class="app-header-text">
+          <span class="app-title">Relatório de Aberturas</span>
+          <span class="app-subtitle">Monitoramento automático de campanhas Snov.io</span>
+        </div>
+      </div>
     </header>
 
-    <!-- Usando o componente EmailForm -->
-    <EmailForm />
+    <main class="app-main">
+      <router-view />
+    </main>
 
-    <!-- Usando o componente CampaignList -->
-    <CampaignList :campaigns="campaigns" />
-
-    <footer>
-      <p>&copy; 2025 Sua Empresa</p>
+    <footer class="app-footer">
+      <small>Ativa.ai &middot; Aberturas de Campanhas Automatizado</small>
     </footer>
   </div>
 </template>
 
 <script>
-// Importando os componentes necessários
-import EmailForm from './components/EmailForm.vue';
-import CampaignList from './components/CampaignList.vue';
-
 export default {
-  name: 'App',
-  components: {
-    EmailForm,
-    CampaignList
-  },
   data() {
     return {
-      campaigns: [] // Aqui você pode armazenar a lista de campanhas, preenchida com os dados reais
+      logoUrl:
+        'https://firebasestorage.googleapis.com/v0/b/ativaaifoto.appspot.com/o/Logo_Ativa_BIMI_Compliant.svg?alt=media&token=93d2725f-7d92-4c87-8299-c769f186b5ff',
     };
-  }
+  },
 };
 </script>
 
-<style scoped>
-/* Estilos gerais do seu app */
-#app {
-  font-family: Arial, sans-serif;
-  background-color: #f9f9f9;
-  padding: 20px;
+<style>
+:root {
+  --ativa-orange: #ff7a00;
+  --ativa-black: #111111;
+  --ativa-white: #ffffff;
+  --ativa-gray: #f5f5f5;
 }
 
-header {
-  background-color: #42b983;
-  padding: 10px;
-  color: white;
-  text-align: center;
-  border-radius: 5px;
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
-footer {
-  margin-top: 20px;
-  text-align: center;
-  color: #777;
-}
-
-main {
-  margin-top: 20px;
-}
-
-/* Estilo do conteúdo da página */
-h1 {
-  font-size: 2em;
+body {
   margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  background: linear-gradient(135deg, #111111, #1f1f1f);
+  color: var(--ativa-white);
 }
 
-p {
-  font-size: 1em;
-  margin: 10px 0;
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  background: var(--ativa-black);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-logo {
+  height: 40px;
+  width: auto;
+}
+
+.app-header-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ativa-white);
+}
+
+.app-subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.app-main {
+  flex: 1;
+  padding: 32px 16px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.app-footer {
+  padding: 12px 16px;
+  text-align: center;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  background: #000;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 </style>
