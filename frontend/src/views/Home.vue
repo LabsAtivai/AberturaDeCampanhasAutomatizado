@@ -38,7 +38,7 @@ export default {
 <style>
 :root {
   --ativa-orange: #ff7a00;
-  --ativa-black: #111111;
+  --ativa-black: #757575;
   --ativa-white: #ffffff;
   --ativa-gray: #f5f5f5;
 }

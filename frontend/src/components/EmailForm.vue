@@ -3,7 +3,7 @@
     <form @submit.prevent="onSubmit" class="form">
       <div class="form-row">
         <label for="email">Email Snov.io</label>
-        <select v-model="selectedEmail" id="email" required>
+        <select v-model="selectedEmail" id="email" required :disabled="isLoading">
           <option value="" disabled>Selecione um email</option>
           <option v-for="email in emailOptions" :key="email" :value="email">
             {{ email }}
@@ -14,24 +14,50 @@
       <div class="form-row form-row-inline">
         <div class="form-field">
           <label for="startDate">Data de início</label>
-          <input v-model="startDate" id="startDate" type="date" required />
+          <input
+            v-model="startDate"
+            id="startDate"
+            type="date"
+            required
+            :disabled="isLoading"
+          />
         </div>
 
         <div class="form-field">
           <label for="endDate">Data de fim</label>
-          <input v-model="endDate" id="endDate" type="date" required />
+          <input
+            v-model="endDate"
+            id="endDate"
+            type="date"
+            required
+            :disabled="isLoading"
+          />
         </div>
       </div>
 
-      <button type="submit" class="btn-primary">
-        Gerar relatório CSV
+      <button type="submit" class="btn-primary" :disabled="isLoading">
+        <span v-if="!isLoading">Gerar relatório CSV</span>
+        <span v-else>Gerando e baixando...</span>
       </button>
     </form>
+
+    <!-- Barra de carregamento -->
+    <div v-if="isLoading" class="loader-wrapper">
+      <div class="loader-text">{{ loadingText }}</div>
+      <div class="loader-bar">
+        <div class="loader-bar-inner"></div>
+      </div>
+    </div>
+
+    <!-- Mensagem de erro simples (opcional) -->
+    <p v-if="errorMessage" class="error-msg">
+      {{ errorMessage }}
+    </p>
   </div>
 </template>
 
 <script>
-import api from '../api'; // conforme combinamos antes
+import api from '../api';
 
 export default {
   data() {
@@ -40,6 +66,9 @@ export default {
       startDate: '',
       endDate: '',
       emailOptions: [],
+      isLoading: false,
+      loadingText: 'Gerando relatório, por favor aguarde...',
+      errorMessage: '',
     };
   },
   async mounted() {
@@ -48,17 +77,27 @@ export default {
       this.emailOptions = res.data;
     } catch (e) {
       console.error('Erro ao carregar emails:', e);
+      this.errorMessage =
+        'Não foi possível carregar a lista de emails Snov.io. Tente novamente mais tarde.';
     }
   },
   methods: {
     async onSubmit() {
+      this.errorMessage = '';
+      this.isLoading = true;
+      this.loadingText = 'Gerando relatório no servidor...';
+
       try {
+        // 1) Gera o CSV
         await api.post('/api/campaigns', {
           emailSnovio: this.selectedEmail,
           startDate: this.startDate,
           endDate: this.endDate,
         });
 
+        this.loadingText = 'Preparando download do CSV...';
+
+        // 2) Faz o download
         const response = await api.get('/api/campaigns/download', {
           responseType: 'blob',
         });
@@ -77,6 +116,10 @@ export default {
         window.URL.revokeObjectURL(url);
       } catch (err) {
         console.error('Erro ao gerar ou baixar o CSV:', err);
+        this.errorMessage =
+          'Ocorreu um erro ao gerar ou baixar o relatório. Tente novamente.';
+      } finally {
+        this.isLoading = false;
       }
     },
   },
@@ -126,6 +169,13 @@ input {
   border: 1px solid #d0d0d0;
   font-size: 14px;
   outline: none;
+  background-color: #fff;
+}
+
+select:disabled,
+input:disabled {
+  background-color: #f0f0f0;
+  cursor: not-allowed;
 }
 
 select:focus,
@@ -160,6 +210,60 @@ input:focus {
 .btn-primary:active {
   transform: translateY(0);
   box-shadow: none;
+}
+
+.btn-primary:disabled {
+  cursor: wait;
+  opacity: 0.8;
+  box-shadow: none;
+}
+
+/* Barra de carregamento */
+.loader-wrapper {
+  margin-top: 16px;
+}
+
+.loader-text {
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 6px;
+}
+
+.loader-bar {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background-color: #e5e5e5;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.loader-bar-inner {
+  position: absolute;
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, #ff7a00, #ffb566);
+  border-radius: 999px;
+  animation: loadingBar 1.2s infinite ease-in-out;
+}
+
+@keyframes loadingBar {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(40%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+/* Mensagem de erro */
+.error-msg {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #c0392b;
 }
 
 @media (max-width: 640px) {
