@@ -26,114 +26,102 @@ export class CampaignsController {
     }));
   }
 
-  @Post()
-  async getCampaigns(@Body() body: CampaignsBody) {
-    console.log('📥 Recebendo requisição para gerar relatório...');
-    console.log('📥 Body recebido:', JSON.stringify(body, null, 2));
-    
-    const { emailSnovio, emailsSnovio, startDate, endDate } = body;
+  @@Post()
+async getCampaigns(@Body() body: CampaignsBody) {
+  console.log('📥 Recebendo requisição para gerar relatório...');
+  
+  const { emailSnovio, emailsSnovio, startDate, endDate } = body;
+  const selectedEmails: string[] = emailsSnovio?.length ? emailsSnovio : emailSnovio ? [emailSnovio] : [];
 
-    const selectedEmails: string[] = emailsSnovio?.length
-      ? emailsSnovio
-      : emailSnovio
-      ? [emailSnovio]
-      : [];
-
-    console.log('📝 Emails a processar:', selectedEmails);
-
-    if (!selectedEmails.length) {
-      console.error('❌ Nenhum email selecionado');
-      throw new Error('Nenhum email Snovio informado');
-    }
-
-    const allData: any[] = [];
-    const countsByEmail: Record<string, number> = {};
-
-    console.log('📋 Lendo clientes da planilha...');
-    const clients = await this.sheetsService.readClientsFromSheet();
-    console.log(`📊 Total de clientes na planilha: ${clients.length}`);
-    
-    for (const email of selectedEmails) {
-      console.log(`\n🔍 Processando: ${email}`);
-      const client = clients.find((c) => c.emailSnovio === email);
-      
-      if (!client) {
-        console.warn(`⚠️ Cliente não encontrado para emailSnovio: ${email}`);
-        console.warn(`📋 Clientes disponíveis:`, clients.map(c => c.emailSnovio));
-        continue;
-      }
-
-      console.log(`✅ Cliente encontrado:`, {
-        email: client.email,
-        clientIdPreview: client.clientId?.slice(0, 8) + '...',
-        emailSnovio: client.emailSnovio,
-      });
-
-      try {
-        const accessToken = await this.campaignsService.getAccessToken(
-          client.clientId,
-          client.clientSecret,
-        );
-        
-        console.log(`✅ Token obtido para ${email}`);
-        
-        const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
-        console.log(`📊 Campanhas encontradas: ${campaigns.length}`);
-        
-        // Processa cada campanha
-        for (const campaign of campaigns) {
-          console.log(`   📧 Processando campanha: ${campaign.name}`);
-          
-          const emailsOpened = await this.campaignsService.getEmailsOpened(
-            accessToken,
-            campaign.id,
-            campaign.name,
-            startDate,
-            endDate,
-          );
-
-          console.log(`   📊 Aberturas encontradas: ${emailsOpened.length}`);
-          
-          // Adiciona os dados do cliente
-          const withClient = emailsOpened.map((item) => ({
-            clientEmail: client.emailSnovio,
-            ...item,
-          }));
-
-          allData.push(...withClient);
-
-          // Conta aberturas por prospect
-          for (const item of emailsOpened) {
-            const p = item.prospectEmail || '';
-            if (!p) continue;
-            countsByEmail[p] = (countsByEmail[p] || 0) + 1;
-          }
-        }
-        
-        console.log(`✅ ${email} processado com sucesso`);
-      } catch (err: any) {
-        console.error(`❌ Erro ao processar ${email}:`, err.message);
-        console.error(`❌ Stack:`, err.stack);
-      }
-    }
-
-    // Salva CSV (caso haja dados)
-    if (allData.length > 0) {
-      await this.campaignsService.saveToCsv(allData);
-    } else {
-      console.log('📭 Nenhum dado encontrado para o período');
-    }
-
-    const totalOpenings = allData.length;
-
-    return {
-      success: true,
-      message: 'Relatório gerado com sucesso!',
-      totalOpenings,
-      countsByEmail,
-      data: allData.slice(0, 10), // Retorna apenas 10 primeiros para preview
-    };
+  if (!selectedEmails.length) {
+    throw new Error('Nenhum email Snovio informado');
   }
+
+  console.log(`🎯 Processando ${selectedEmails.length} cliente(s)...`);
+  
+  const clients = await this.sheetsService.readClientsFromSheet();
+  const allData: any[] = [];
+  const countsByEmail: Record<string, number> = {};
+  
+  // Processa clientes em PARALELO
+  const clientPromises = selectedEmails.map(async (email) => {
+    console.log(`\n🔍 Iniciando processamento paralelo: ${email}`);
+    const client = clients.find((c) => c.emailSnovio === email);
+    
+    if (!client) {
+      console.warn(`⚠️ Cliente não encontrado: ${email}`);
+      return { data: [], counts: {} };
+    }
+
+    try {
+      // 1. Obtém token
+      const accessToken = await this.campaignsService.getAccessToken(
+        client.clientId,
+        client.clientSecret,
+      );
+      
+      // 2. Obtém TODAS as campanhas
+      const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
+      console.log(`📊 ${email}: ${campaigns.length} campanhas encontradas`);
+      
+      // 3. Processa aberturas EM PARALELO (nova função)
+      const emailsOpened = await this.campaignsService.getEmailsOpenedFast(
+        accessToken,
+        campaigns,
+        startDate,
+        endDate,
+      );
+      
+      console.log(`✅ ${email}: ${emailsOpened.length} aberturas no período`);
+      
+      // 4. Adiciona email do cliente
+      const withClient = emailsOpened.map((item) => ({
+        clientEmail: client.emailSnovio,
+        ...item,
+      }));
+      
+      // 5. Contabiliza
+      const clientCounts: Record<string, number> = {};
+      emailsOpened.forEach(item => {
+        const p = item.prospectEmail || '';
+        if (p) clientCounts[p] = (clientCounts[p] || 0) + 1;
+      });
+      
+      return { data: withClient, counts: clientCounts };
+      
+    } catch (err: any) {
+      console.error(`❌ Erro em ${email}:`, err.message);
+      return { data: [], counts: {} };
+    }
+  });
+  
+  // Aguarda TODOS os clientes processarem
+  const results = await Promise.all(clientPromises);
+  
+  // Consolida resultados
+  results.forEach(result => {
+    allData.push(...result.data);
+    Object.entries(result.counts).forEach(([email, count]) => {
+      countsByEmail[email] = (countsByEmail[email] || 0) + count;
+    });
+  });
+  
+  // Salva CSV e retorna
+  if (allData.length > 0) {
+    await this.campaignsService.saveToCsv(allData);
+  }
+  
+  console.log(`🏁 Processamento concluído! Total: ${allData.length} aberturas`);
+  
+  return {
+    success: true,
+    message: 'Relatório gerado com sucesso!',
+    totalOpenings: allData.length,
+    countsByEmail,
+    processedClients: selectedEmails.length,
+    clientsWithData: results.filter(r => r.data.length > 0).length,
+  };
+}
 
   @Get('download')
   async downloadCsv(@Res() res: Response) {
@@ -206,3 +194,4 @@ export class CampaignsController {
     }
   }
 }
+
