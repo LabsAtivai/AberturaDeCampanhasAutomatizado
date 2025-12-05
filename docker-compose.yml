@@ -19,7 +19,14 @@ services:
     networks:
       - ativaai
 
+
+  backend-aberturas:
+    volumes:
+      - /srv/credentials/credentials.json:/usr/src/app/credentials.json
+      
+
 networks:
   ativaai:
     external: true
+
 
