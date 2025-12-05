@@ -10,7 +10,7 @@ interface CampaignsBody {
   endDate: string;
 }
 
-@Controller('api/campaigns')
+@Controller('campaigns')
 export class CampaignsController {
   constructor(
     private readonly campaignsService: CampaignsService,
@@ -174,3 +174,4 @@ export class CampaignsController {
     }
   }
 }
+
