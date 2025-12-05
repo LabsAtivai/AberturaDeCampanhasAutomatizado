@@ -2,6 +2,8 @@ version: "3.8"    # mudei para 3.8 (mais compatível)
 
 services:
   backend-aberturas:
+    volumes:
+      - /srv/credentials/credentials.json:/usr/src/app/credentials.json
     build: ./backend
     container_name: backend-aberturas
     restart: unless-stopped
@@ -20,13 +22,12 @@ services:
       - ativaai
 
 
-  backend-aberturas:
-    volumes:
-      - /srv/credentials/credentials.json:/usr/src/app/credentials.json
+  
       
 
 networks:
   ativaai:
     external: true
+
 
 
