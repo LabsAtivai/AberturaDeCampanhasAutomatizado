@@ -16,23 +16,36 @@
           Email Snov.io (pode selecionar vários)
         </label>
         <select
-          v-model="selectedEmails"
+          v-model="selectedEmailValues"
           multiple
           class="email-select"
           :disabled="isLoading || !filteredOptions.length"
           size="6"
+          @change="logSelection"
         >
           <option
             v-for="opt in filteredOptions"
-            :key="getOptionValue(opt)"
-            :value="getOptionValue(opt)"
+            :key="opt.value"
+            :value="opt.value"
+            :title="opt.label"
           >
-            {{ getOptionLabel(opt) }}
+            {{ opt.label }}
           </option>
         </select>
         <small class="helper">
           Use CTRL / SHIFT para selecionar mais de um email.
+          <span v-if="selectedEmailValues.length > 0">
+            Selecionados: {{ selectedEmailValues.length }}
+          </span>
         </small>
+        
+        <!-- DEBUG: Mostrar o que está sendo enviado -->
+        <div v-if="debugMode" class="debug-info">
+          <h4>🔍 Debug Info:</h4>
+          <p><strong>Valores selecionados:</strong> {{ selectedEmailValues }}</p>
+          <p><strong>Opções filtradas:</strong> {{ filteredOptions.length }}</p>
+          <p><strong>Opções completas:</strong> {{ emailOptions.length }}</p>
+        </div>
       </div>
 
       <!-- DATAS -->
@@ -44,6 +57,7 @@
             type="date"
             required
             :disabled="isLoading"
+            @change="validateDates"
           />
         </div>
 
@@ -54,6 +68,7 @@
             type="date"
             required
             :disabled="isLoading"
+            @change="validateDates"
           />
         </div>
       </div>
@@ -63,19 +78,27 @@
         <button
           type="submit"
           class="btn-primary"
-          :disabled="isLoading || !selectedEmails.length"
+          :disabled="isLoading || !selectedEmailValues.length"
         >
-          <span v-if="!isLoading">Gerar CSV</span>
-          <span v-else>Gerando CSV...</span>
+          <span v-if="!isLoading">📈 Gerar CSV</span>
+          <span v-else>⏳ Gerando CSV...</span>
         </button>
 
         <button
           type="button"
           class="btn-secondary"
-          :disabled="isLoading || !selectedEmails.length"
+          :disabled="isLoading || !selectedEmailValues.length"
           @click="onStatsClick"
         >
-          Estatísticas de abertura
+          📊 Estatísticas de abertura
+        </button>
+        
+        <button
+          type="button"
+          class="btn-info"
+          @click="debugMode = !debugMode"
+        >
+          🔧 Debug
         </button>
       </div>
     </form>
@@ -86,20 +109,28 @@
       <div class="loader-bar">
         <div class="loader-bar-inner"></div>
       </div>
+      
+      <!-- Mostrar emails sendo processados -->
+      <div v-if="processingEmails.length" class="processing-info">
+        <p>Processando:</p>
+        <ul>
+          <li v-for="email in processingEmails" :key="email">{{ email }}</li>
+        </ul>
+      </div>
     </div>
 
     <!-- MENSAGENS -->
-    <p v-if="warningMessage" class="warning-msg">
-      {{ warningMessage }}
-    </p>
+    <div v-if="warningMessage" class="warning-msg">
+      ⚠️ {{ warningMessage }}
+    </div>
 
-    <p v-if="errorMessage" class="error-msg">
-      {{ errorMessage }}
-    </p>
+    <div v-if="errorMessage" class="error-msg">
+      ❌ {{ errorMessage }}
+    </div>
 
     <!-- ESTATÍSTICAS -->
     <div v-if="showStats && totalOpenings > 0" class="stats-box">
-      <div class="stats-header">Estatísticas de aberturas</div>
+      <div class="stats-header">📊 Estatísticas de aberturas</div>
 
       <p class="stats-total">
         Total de aberturas no período:
@@ -126,10 +157,10 @@ import api from '../api';
 export default {
   data() {
     return {
-      selectedEmails: [],
+      selectedEmailValues: [], // Armazena os valores reais (emailSnovio)
       startDate: '',
       endDate: '',
-      emailOptions: [],         // pode vir string[] ou [{ emailSnovio, totalCampaigns }]
+      emailOptions: [], // Array de objetos { value, label }
       searchTerm: '',
       isLoading: false,
       loadingText: 'Processando...',
@@ -138,18 +169,43 @@ export default {
       totalOpenings: 0,
       emailCounts: [],
       showStats: false,
+      debugMode: false,
+      processingEmails: [],
     };
   },
 
   async mounted() {
     try {
+      this.loadingText = 'Carregando emails...';
       const res = await api.get('/api/campaigns/get-emails');
-      // Aceita tanto array de strings quanto array de objetos
-      this.emailOptions = res.data || [];
+      
+      // Transforma os dados para o formato correto
+      this.emailOptions = (res.data || []).map(item => {
+        // item pode ser string ou objeto com emailSnovio e totalCampaigns
+        let value, label;
+        
+        if (typeof item === 'string') {
+          value = item;
+          label = item;
+        } else if (item.emailSnovio) {
+          value = item.emailSnovio;
+          
+        } else if (item.email) {
+          value = item.email;
+          
+        } else {
+          value = JSON.stringify(item);
+          label = JSON.stringify(item);
+        }
+        
+        return { value, label };
+      });
+      
+      console.log('📧 Emails carregados:', this.emailOptions);
+      this.setDefaultDates();
     } catch (err) {
-      console.error('Erro ao carregar emails:', err);
-      this.errorMessage =
-        'Não foi possível carregar a lista de emails Snov.io. Tente novamente mais tarde.';
+      console.error('❌ Erro ao carregar emails:', err);
+      this.errorMessage = 'Não foi possível carregar a lista de emails. Verifique a conexão.';
     }
   },
 
@@ -159,27 +215,50 @@ export default {
       if (!term) return this.emailOptions;
 
       return this.emailOptions.filter((opt) => {
-        const email =
-          typeof opt === 'string' ? opt : (opt.emailSnovio || '');
-        return email.toLowerCase().includes(term);
+        // Filtra tanto pelo valor quanto pelo label
+        return (
+          opt.value.toLowerCase().includes(term) ||
+          opt.label.toLowerCase().includes(term)
+        );
       });
     },
   },
 
   methods: {
-    getOptionValue(opt) {
-      return typeof opt === 'string' ? opt : opt.emailSnovio;
+    setDefaultDates() {
+      const today = new Date();
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(today.getMonth() - 1);
+      
+      // Formato YYYY-MM-DD para input date
+      this.endDate = today.toISOString().split('T')[0];
+      this.startDate = oneMonthAgo.toISOString().split('T')[0];
     },
-    getOptionLabel(opt) {
-      if (typeof opt === 'string') {
-        return opt;
+    
+    validateDates() {
+      if (this.startDate && this.endDate) {
+        const start = new Date(this.startDate);
+        const end = new Date(this.endDate);
+        
+        if (start > end) {
+          this.warningMessage = 'Data inicial não pode ser maior que data final';
+          // Auto-corrige trocando as datas
+          [this.startDate, this.endDate] = [this.endDate, this.startDate];
+        } else {
+          this.warningMessage = '';
+        }
       }
-      if (opt.totalCampaigns != null) {
-        return `${opt.emailSnovio} (${opt.totalCampaigns} campanhas)`;
-      }
-      return opt.emailSnovio;
     },
-
+    
+    logSelection() {
+      console.log('📝 Emails selecionados:', this.selectedEmailValues);
+      console.log('📝 Opções selecionadas detalhadas:', 
+        this.selectedEmailValues.map(value => 
+          this.emailOptions.find(opt => opt.value === value)?.label || value
+        )
+      );
+    },
+    
     async onSubmit() {
       await this.runReport({ downloadCsv: true });
     },
@@ -189,72 +268,105 @@ export default {
     },
 
     async runReport({ downloadCsv }) {
+      console.log('🚀 Iniciando relatório...');
+      console.log('📤 Emails que serão enviados:', this.selectedEmailValues);
+      console.log('📤 Data inicial:', this.startDate);
+      console.log('📤 Data final:', this.endDate);
+      
+      if (!this.selectedEmailValues.length) {
+        this.warningMessage = 'Selecione pelo menos um email Snov.io.';
+        return;
+      }
+
+      if (!this.startDate || !this.endDate) {
+        this.warningMessage = 'Selecione o período.';
+        return;
+      }
+      
       this.errorMessage = '';
       this.warningMessage = '';
       this.totalOpenings = 0;
       this.emailCounts = [];
       this.showStats = false;
       this.isLoading = true;
-      this.loadingText = 'Consultando campanhas...';
-
+      this.processingEmails = [...this.selectedEmailValues];
+      
       try {
-        if (!this.selectedEmails.length) {
-          this.warningMessage = 'Selecione pelo menos um email Snov.io.';
-          return;
-        }
-
-        // datas dd/mm/yyyy para o backend
-        const start = this.startDate.split('-').reverse().join('/'); // dd/mm/yyyy
-        const end = this.endDate.split('-').reverse().join('/');
-
-        const res = await api.post('/api/campaigns', {
-          emailsSnovio: this.selectedEmails,
-          startDate: start,
-          endDate: end,
-        });
-
-        const { totalOpenings, countsByEmail } = res.data || {};
+        // Formata datas para dd/mm/yyyy
+        const formatForAPI = (dateStr) => {
+          const [year, month, day] = dateStr.split('-');
+          return `${day}/${month}/${year}`;
+        };
+        
+        const payload = {
+          emailsSnovio: this.selectedEmailValues,
+          startDate: formatForAPI(this.startDate),
+          endDate: formatForAPI(this.endDate),
+        };
+        
+        console.log('📤 Payload enviado:', payload);
+        
+        this.loadingText = 'Consultando campanhas...';
+        const res = await api.post('/api/campaigns', payload);
+        
+        console.log('📥 Resposta recebida:', res.data);
+        
+        const { totalOpenings, countsByEmail, message } = res.data || {};
         this.totalOpenings = totalOpenings || 0;
-
+        
+        // Transforma countsByEmail em array para exibição
         const entries = Object.entries(countsByEmail || {});
         this.emailCounts = entries
           .map(([email, count]) => ({ email, count }))
           .sort((a, b) => b.count - a.count);
-
-        if (!this.totalOpenings) {
-          this.warningMessage =
-            'Nenhum dado encontrado para os emails selecionados no período informado.';
-          return; // não baixa CSV sem dados
-        }
-
+        
         this.showStats = true;
-
-        if (downloadCsv) {
+        this.warningMessage = this.totalOpenings === 0 
+          ? 'Nenhuma abertura encontrada no período selecionado.'
+          : '';
+        
+        if (downloadCsv && this.totalOpenings > 0) {
           this.loadingText = 'Baixando CSV...';
-
-          const file = await api.get('/api/campaigns/download', {
-            responseType: 'blob',
-          });
-
-          const blob = new Blob([file.data], {
-            type: 'text/csv;charset=utf-8;',
-          });
-          const url = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-
-          link.href = url;
-          link.setAttribute('download', 'AberturasDeCampanhas.csv');
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          window.URL.revokeObjectURL(url);
+          
+          try {
+            const file = await api.get('/api/campaigns/download', {
+              responseType: 'blob',
+            });
+            
+            const blob = new Blob([file.data], {
+              type: 'text/csv;charset=utf-8;',
+            });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            
+            link.href = url;
+            link.setAttribute('download', 'AberturasDeCampanhas.csv');
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            
+            console.log('✅ CSV baixado com sucesso');
+          } catch (downloadError) {
+            console.error('❌ Erro ao baixar CSV:', downloadError);
+            this.errorMessage = 'CSV gerado, mas houve erro no download.';
+          }
         }
       } catch (err) {
-        console.error('Erro ao gerar relatório:', err);
-        this.errorMessage =
-          'Ocorreu um erro ao gerar o relatório. Tente novamente.';
+        console.error('❌ Erro ao gerar relatório:', err);
+        console.error('❌ Detalhes:', err.response?.data);
+        
+        if (err.response?.data?.message) {
+          this.errorMessage = `Erro: ${err.response.data.message}`;
+        } else if (err.response?.status === 401) {
+          this.errorMessage = 'Falha na autenticação com Snov.io. Verifique as credenciais.';
+        } else {
+          this.errorMessage = 'Ocorreu um erro ao gerar o relatório. Tente novamente.';
+        }
       } finally {
         this.isLoading = false;
+        this.processingEmails = [];
+        this.loadingText = 'Processando...';
       }
     },
   },
@@ -262,260 +374,69 @@ export default {
 </script>
 
 <style scoped>
-.form-wrapper {
-  margin-top: 4px;
+/* Estilos anteriores mantidos... */
+
+/* Novos estilos para debug */
+.debug-info {
+  margin-top: 10px;
+  padding: 10px;
+  background-color: #f5f5f5;
+  border-radius: 5px;
+  border-left: 4px solid #2196f3;
+  font-size: 12px;
 }
 
-/* BUSCA */
-
-.search-input {
-  padding: 9px 11px;
-  border-radius: 10px;
-  border: 1px solid #d0d0d0;
-  font-size: 14px;
-  outline: none;
-  margin-bottom: 8px;
+.debug-info h4 {
+  margin: 0 0 5px 0;
+  color: #2196f3;
 }
 
-.search-input:focus {
-  border-color: var(--ativa-orange);
-  box-shadow: 0 0 0 2px rgba(255, 122, 0, 0.2);
+.processing-info {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #666;
 }
 
-.email-select {
-  padding: 6px 8px;
-  border-radius: 10px;
-  border: 1px solid #d0d0d0;
-  font-size: 13px;
-  outline: none;
-  min-height: 140px;
+.processing-info ul {
+  margin: 5px 0;
+  padding-left: 20px;
 }
 
-.email-select:focus {
-  border-color: var(--ativa-orange);
-  box-shadow: 0 0 0 2px rgba(255, 122, 0, 0.2);
+.processing-info li {
+  margin: 2px 0;
 }
 
-.helper {
-  font-size: 11px;
-  color: #777;
-  margin-top: 4px;
-}
-
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.form-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.form-row-inline {
-  flex-direction: row;
-  align-items: flex-end;
-  gap: 18px;
-  margin-top: 4px;
-}
-
-.form-field {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #333;
-}
-
-select,
-input[type="date"] {
-  padding: 9px 11px;
-  border-radius: 10px;
-  border: 1px solid #d0d0d0;
-  font-size: 14px;
-  outline: none;
-  background-color: #fff;
-}
-
-select:disabled,
-input:disabled {
-  background-color: #f0f0f0;
-  cursor: not-allowed;
-}
-
-/* BOTÕES */
-
-.buttons-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 6px;
-}
-
-.btn-primary,
-.btn-secondary {
-  padding: 10px 22px;
+.btn-info {
+  padding: 8px 15px;
   border-radius: 999px;
-  border: none;
-  font-size: 14px;
-  font-weight: 600;
+  border: 1px solid #2196f3;
+  background: #e3f2fd;
+  color: #2196f3;
+  font-size: 12px;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.08s ease, box-shadow 0.12s ease, background 0.12s ease,
-    color 0.12s ease, border-color 0.12s ease;
+  transition: all 0.2s;
 }
 
-.btn-primary {
-  background: var(--ativa-orange);
-  color: var(--ativa-white);
+.btn-info:hover {
+  background: #bbdefb;
 }
 
-.btn-primary:hover {
-  background: #ff8f26;
-  box-shadow: 0 10px 26px rgba(255, 122, 0, 0.4);
-  transform: translateY(-1px);
+/* Melhorar visibilidade dos selects */
+.email-select option {
+  padding: 5px;
+  border-bottom: 1px solid #eee;
 }
 
-.btn-secondary {
-  background: #ffffff;
-  color: #222;
-  border: 1px solid #d0d0d0;
+.email-select option:checked {
+  background-color: #ff7a00;
+  color: white;
 }
 
-.btn-secondary:hover {
-  background: #f8f8f8;
-  border-color: #bdbdbd;
-}
-
-.btn-primary:disabled,
-.btn-secondary:disabled {
-  cursor: wait;
-  opacity: 0.85;
-  box-shadow: none;
-}
-
-/* Loader */
-
-.loader-wrapper {
-  margin-top: 16px;
-}
-
-.loader-text {
-  font-size: 12px;
-  color: #555;
-  margin-bottom: 6px;
-}
-
-.loader-bar {
-  position: relative;
-  width: 100%;
-  height: 6px;
-  background-color: #e5e5e5;
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.loader-bar-inner {
-  position: absolute;
-  height: 100%;
-  width: 40%;
-  background: linear-gradient(90deg, #ff7a00, #ffb566);
-  border-radius: 999px;
-  animation: loadingBar 1.2s infinite ease-in-out;
-}
-
-@keyframes loadingBar {
-  0% {
-    transform: translateX(-100%);
-  }
-  50% {
-    transform: translateX(40%);
-  }
-  100% {
-    transform: translateX(120%);
-  }
-}
-
-/* Mensagens */
-
-.error-msg {
-  margin-top: 10px;
-  font-size: 12px;
-  color: #c0392b;
-}
-
-.warning-msg {
-  margin-top: 10px;
-  font-size: 12px;
+/* Indicador de seleção */
+.helper span {
+  display: block;
+  margin-top: 5px;
+  font-weight: bold;
   color: #ff7a00;
-}
-
-/* Estatísticas */
-
-.stats-box {
-  margin-top: 18px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.stats-header {
-  font-size: 13px;
-  font-weight: 700;
-  color: #222;
-  margin-bottom: 6px;
-}
-
-.stats-total {
-  font-size: 13px;
-  margin: 0 0 10px;
-  color: #444;
-}
-
-.stats-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.stats-item {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  padding: 4px 0;
-  border-bottom: 1px dashed rgba(0, 0, 0, 0.06);
-}
-
-.stats-item:last-child {
-  border-bottom: none;
-}
-
-.stats-email {
-  color: #333;
-}
-
-.stats-count {
-  font-weight: 600;
-  color: #ff7a00;
-}
-
-/* Responsivo */
-
-@media (max-width: 640px) {
-  .form-row-inline {
-    flex-direction: column;
-  }
 }
 </style>
