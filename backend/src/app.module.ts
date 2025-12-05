@@ -7,7 +7,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
-    CampaignsModule, // 👈 importantíssimo
+    CampaignsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
