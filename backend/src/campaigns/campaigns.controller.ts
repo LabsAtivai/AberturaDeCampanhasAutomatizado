@@ -1,136 +1,130 @@
-import { Controller, Post, Body, Get, Res } from '@nestjs/common';
-import { CampaignsService } from './campaigns.service';
-import { SheetsService } from '../shared/sheets.service';
-import type { Response } from 'express';
+// ... outras funções ...
 
-interface CampaignsBody {
-  emailSnovio?: string;
-  emailsSnovio?: string[];
-  startDate: string;
-  endDate: string;
+async getEmailsOpenedFast(
+  accessToken: string,
+  campaigns: Array<{id: string, name: string}>,
+  startDate: string, // RECEBE DO CONTROLLER
+  endDate: string,   // RECEBE DO CONTROLLER
+) {
+  console.log(`🚀 Processando ${campaigns.length} campanhas em paralelo...`);
+  console.log(`📅 Período: ${startDate} a ${endDate}`);
+  
+  const start = this.parseBrDate(startDate);
+  const end = this.parseBrDate(endDate);
+  
+  // Processa até 10 campanhas por lote
+  const BATCH_SIZE = 10;
+  const allData: any[] = [];
+  
+  for (let i = 0; i < campaigns.length; i += BATCH_SIZE) {
+    const batch = campaigns.slice(i, i + BATCH_SIZE);
+    const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(campaigns.length / BATCH_SIZE);
+    
+    console.log(`📦 Lote ${batchNumber}/${totalBatches} (${batch.length} campanhas)`);
+    
+    const promises = batch.map(campaign => 
+      this.getSingleCampaignEmails(accessToken, campaign, start, end)
+    );
+    
+    const batchResults = await Promise.all(promises);
+    allData.push(...batchResults.flat());
+    
+    // Pequena pausa entre lotes
+    if (i + BATCH_SIZE < campaigns.length) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+  }
+  
+  console.log(`✅ Total de aberturas: ${allData.length}`);
+  return allData;
 }
 
-@Controller('api/campaigns')
-export class CampaignsController {
-  constructor(
-    private readonly campaignsService: CampaignsService,
-    private readonly sheetsService: SheetsService,
-  ) {}
-
-  @Get('get-emails')
-  async getEmails() {
-    const clients = await this.sheetsService.readClientsFromSheet();
-    return clients.map((client) => ({
-      emailSnovio: client.emailSnovio,
-      totalCampaigns: client.totalCampaigns || 0,
-    }));
-  }
-
-  @Post()
-  async getCampaigns(@Body() body: CampaignsBody) {
-    console.log('📥 Recebendo requisição para gerar relatório...');
-    
-    const { emailSnovio, emailsSnovio, startDate, endDate } = body;
-    const selectedEmails: string[] = emailsSnovio?.length ? emailsSnovio : emailSnovio ? [emailSnovio] : [];
-
-    if (!selectedEmails.length) {
-      throw new Error('Nenhum email Snovio informado');
-    }
-
-    console.log(`🎯 Processando ${selectedEmails.length} cliente(s)...`);
-    
-    const clients = await this.sheetsService.readClientsFromSheet();
-    const allData: any[] = [];
-    const countsByEmail: Record<string, number> = {};
-    
-    // Processa clientes em PARALELO
-    const clientPromises = selectedEmails.map(async (email) => {
-      console.log(`\n🔍 Iniciando processamento paralelo: ${email}`);
-      const client = clients.find((c) => c.emailSnovio === email);
-      
-      if (!client) {
-        console.warn(`⚠️ Cliente não encontrado: ${email}`);
-        return { data: [], counts: {} };
-      }
-
-      try {
-        // 1. Obtém token
-        const accessToken = await this.campaignsService.getAccessToken(
-          client.clientId,
-          client.clientSecret,
-        );
-        
-        // 2. Obtém TODAS as campanhas
-        const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
-        console.log(`📊 ${email}: ${campaigns.length} campanhas encontradas`);
-        
-        // 3. Processa aberturas EM PARALELO (nova função)
-        const emailsOpened = await this.campaignsService.getEmailsOpenedFast(
-          accessToken,
-          campaigns,
-          startDate,
-          endDate,
-        );
-        
-        console.log(`✅ ${email}: ${emailsOpened.length} aberturas no período`);
-        
-        // 4. Adiciona email do cliente
-        const withClient = emailsOpened.map((item) => ({
-          clientEmail: client.emailSnovio,
-          ...item,
-        }));
-        
-        // 5. Contabiliza
-        const clientCounts: Record<string, number> = {};
-        emailsOpened.forEach(item => {
-          const p = item.prospectEmail || '';
-          if (p) clientCounts[p] = (clientCounts[p] || 0) + 1;
-        });
-        
-        return { data: withClient, counts: clientCounts };
-        
-      } catch (err: any) {
-        console.error(`❌ Erro em ${email}:`, err.message);
-        return { data: [], counts: {} };
-      }
+private async getSingleCampaignEmails(
+  accessToken: string,
+  campaign: {id: string, name: string},
+  start: Date, // JÁ CONVERTIDO
+  end: Date    // JÁ CONVERTIDO
+) {
+  const url = 'https://api.snov.io/v1/get-emails-opened';
+  
+  try {
+    const { data } = await axios.get(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { campaignId: campaign.id },
+      timeout: 10000,
     });
-    
-    // Aguarda TODOS os clientes processarem
-    const results = await Promise.all(clientPromises);
-    
-    // Consolida resultados
-    results.forEach(result => {
-      allData.push(...result.data);
-      Object.entries(result.counts).forEach(([email, count]) => {
-        countsByEmail[email] = (countsByEmail[email] || 0) + count;
+
+    if (!Array.isArray(data)) return [];
+
+    return data
+      .filter((item: any) => {
+        const visitedAt = new Date(item.visitedAt);
+        return visitedAt >= start && visitedAt <= end;
+      })
+      .map((item: any) => {
+        const visitedDate = new Date(item.visitedAt);
+        const day = String(visitedDate.getDate()).padStart(2, '0');
+        const month = String(visitedDate.getMonth() + 1).padStart(2, '0');
+        const year = visitedDate.getFullYear();
+        const formattedDate = `${day}-${month}-${year}`;
+
+        return {
+          campaignId: campaign.id,
+          campaign: campaign.name || 'N/A',
+          prospectEmail: item.prospectEmail || '',
+          sourcePage: item.sourcePage || '',
+          visitedAt: formattedDate,
+        };
       });
-    });
-    
-    // Salva CSV e retorna
-    if (allData.length > 0) {
-      await this.campaignsService.saveToCsv(allData);
-    }
-    
-    console.log(`🏁 Processamento concluído! Total: ${allData.length} aberturas`);
-    
-    return {
-      success: true,
-      message: 'Relatório gerado com sucesso!',
-      totalOpenings: allData.length,
-      countsByEmail,
-      processedClients: selectedEmails.length,
-      clientsWithData: results.filter(r => r.data.length > 0).length,
-    };
+  } catch (err: any) {
+    console.error(`❌ Campanha ${campaign.id}:`, err.message);
+    return [];
   }
+}
 
-  @Get('download')
-  async downloadCsv(@Res() res: Response) {
-    const filePath = this.campaignsService.getCsvFilePath();
-    const fileName = 'AberturasDeCampanhas.csv';
+// Função original mantida para compatibilidade
+async getEmailsOpened(
+  accessToken: string,
+  campaignId: string,
+  campaignName: string,
+  startDate: string, // RECEBE DO CALLER
+  endDate: string,   // RECEBE DO CALLER
+) {
+  const url = 'https://api.snov.io/v1/get-emails-opened';
+  try {
+    const { data } = await axios.get(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { campaignId },
+    });
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    if (!Array.isArray(data)) return [];
 
-    return res.download(filePath, fileName);
+    const start = this.parseBrDate(startDate);
+    const end = this.parseBrDate(endDate);
+
+    return data
+      .filter((item: any) => {
+        const visitedAt = new Date(item.visitedAt);
+        return visitedAt >= start && visitedAt <= end;
+      })
+      .map((item: any) => {
+        const visitedDate = new Date(item.visitedAt);
+        const day = String(visitedDate.getDate()).padStart(2, '0');
+        const month = String(visitedDate.getMonth() + 1).padStart(2, '0');
+        const year = visitedDate.getFullYear();
+        const formattedDate = `${day}-${month}-${year}`;
+
+        return {
+          campaignId,
+          campaign: campaignName || 'N/A',
+          prospectEmail: item.prospectEmail || '',
+          sourcePage: item.sourcePage || '',
+          visitedAt: formattedDate,
+        };
+      });
+  } catch (err: any) {
+    console.error('Erro ao obter aberturas:', err.message || err);
+    throw new Error('Falha ao obter aberturas');
   }
 }
