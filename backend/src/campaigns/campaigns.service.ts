@@ -51,36 +51,44 @@ export class CampaignsService {
 
   // === SNOV.IO ===
 
-  async getAccessToken(clientId: string, clientSecret: string) {
-    const url = 'https://api.snov.io/v1/oauth/access_token';
+ async getAccessToken(clientId: string, clientSecret: string) {
+  console.log('🔑 Obtendo token do Snov.io (formato JSON)...');
+  
+  const url = 'https://api.snov.io/v1/oauth/access_token';
 
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
+  // USE O MESMO FORMATO DO CÓDIGO FUNCIONAL (JSON)
+  const body = {
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret,
+  };
+
+  try {
+    const { data } = await axios.post(url, body, {
+      headers: { 
+        'Content-Type': 'application/json', // MUDADO DE 'x-www-form-urlencoded'
+        'Accept': 'application/json',
+      },
+      timeout: 10000,
     });
 
-    try {
-      const { data } = await axios.post(url, body.toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: 10000,
-      });
+    console.log('✅ Token obtido com sucesso!');
 
-      if (!data.access_token) {
-        console.error('Resposta do Snov NÃO tem access_token:', data);
-        throw new Error('Snov não retornou access_token');
-      }
-
-      return data.access_token;
-    } catch (err: any) {
-      console.error('Erro ao obter token do Snov.io:', {
-        status: err.response?.status,
-        data: err.response?.data,
-        clientIdSnippet: clientId?.slice(0, 6),
-      });
-      throw new Error('Falha ao obter access token');
+    if (!data.access_token) {
+      console.error('❌ Snov não retornou access_token:', data);
+      throw new Error('Snov não retornou access_token');
     }
+
+    return data.access_token;
+  } catch (err: any) {
+    console.error('❌ Erro ao obter token do Snov.io:', {
+      status: err.response?.status,
+      data: err.response?.data,
+      message: err.message,
+    });
+    throw new Error(`Falha ao obter access token: ${err.response?.data?.error || err.message}`);
   }
+}
 
   async getUserCampaigns(accessToken: string) {
     const url = 'https://api.snov.io/v1/get-user-campaigns';
@@ -217,3 +225,4 @@ export class CampaignsService {
     return allData;
   }
 }
+
