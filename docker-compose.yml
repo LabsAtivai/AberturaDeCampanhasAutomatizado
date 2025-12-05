@@ -6,7 +6,7 @@ services:
     container_name: backend-aberturas
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"
     networks:
       - ativaai
 
@@ -22,3 +22,4 @@ services:
 networks:
   ativaai:
     external: true
+
