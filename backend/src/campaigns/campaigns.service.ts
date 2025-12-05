@@ -9,11 +9,28 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 export class CampaignsService {
   constructor(private readonly sheetsService: SheetsService) {}
   private readonly csvFileName = 'AberturasDeCampanhas.csv';
+  
+  // Rate limiting
+  private readonly rateLimitDelay = 100; // ms entre requisições
+  private lastRequestTime = 0;
 
   getCsvFilePath(): string {
     return path.resolve(process.cwd(), this.csvFileName);
   }
-  
+
+  private async rateLimitedRequest(config: any) {
+    const now = Date.now();
+    const timeSinceLast = now - this.lastRequestTime;
+    
+    if (timeSinceLast < this.rateLimitDelay) {
+      await new Promise(resolve => 
+        setTimeout(resolve, this.rateLimitDelay - timeSinceLast)
+      );
+    }
+    
+    this.lastRequestTime = Date.now();
+    return axios(config);
+  }
 
   // === CRON DIÁRIO: atualiza contagem de campanhas na planilha ===
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
@@ -52,46 +69,45 @@ export class CampaignsService {
 
   // === SNOV.IO ===
 
- async getAccessToken(clientId: string, clientSecret: string) {
-  console.log('🔑 Obtendo token do Snov.io (formato JSON)...');
-  
-  const url = 'https://api.snov.io/v1/oauth/access_token';
+  async getAccessToken(clientId: string, clientSecret: string) {
+    console.log('🔑 Obtendo token do Snov.io (formato JSON)...');
+    
+    const url = 'https://api.snov.io/v1/oauth/access_token';
 
-  // USE O MESMO FORMATO DO CÓDIGO FUNCIONAL (JSON)
-  const body = {
-    grant_type: 'client_credentials',
-    client_id: clientId,
-    client_secret: clientSecret,
-  };
+    const body = {
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+    };
 
-  try {
-    const { data } = await axios.post(url, body, {
-      headers: { 
-        'Content-Type': 'application/json', // MUDADO DE 'x-www-form-urlencoded'
-        'Accept': 'application/json',
-      },
-      timeout: 10000,
-    });
+    try {
+      const { data } = await axios.post(url, body, {
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        timeout: 10000,
+      });
 
-    console.log('✅ Token obtido com sucesso!');
+      console.log('✅ Token obtido com sucesso!');
 
-    if (!data.access_token) {
-      console.error('❌ Snov não retornou access_token:', data);
-      throw new Error('Snov não retornou access_token');
+      if (!data.access_token) {
+        console.error('❌ Snov não retornou access_token:', data);
+        throw new Error('Snov não retornou access_token');
+      }
+
+      return data.access_token;
+    } catch (err: any) {
+      console.error('❌ Erro ao obter token do Snov.io:', {
+        status: err.response?.status,
+        data: err.response?.data,
+        message: err.message,
+      });
+      throw new Error(`Falha ao obter access token: ${err.response?.data?.error || err.message}`);
     }
-
-    return data.access_token;
-  } catch (err: any) {
-    console.error('❌ Erro ao obter token do Snov.io:', {
-      status: err.response?.status,
-      data: err.response?.data,
-      message: err.message,
-    });
-    throw new Error(`Falha ao obter access token: ${err.response?.data?.error || err.message}`);
   }
-}
 
-    async getUserCampaigns(accessToken: string) {
+  async getUserCampaigns(accessToken: string) {
     console.log('📊 Obtendo campanhas com nomes...');
     
     // TENTA PRIMEIRO A NOVA API (get-campaign-analytics)
@@ -108,30 +124,31 @@ export class CampaignsService {
       console.log('✅ Resposta da API analytics recebida');
       
       // Verifica se é array
-      if (!Array.isArray(data)) {
-        console.warn('⚠️ Resposta não é array. Estrutura:', typeof data);
+      let campaignsData = data;
+      if (!Array.isArray(campaignsData)) {
+        console.warn('⚠️ Resposta não é array. Estrutura:', typeof campaignsData);
         
         // Se for objeto, tenta encontrar array dentro
-        if (data && typeof data === 'object') {
-          const keys = Object.keys(data);
+        if (campaignsData && typeof campaignsData === 'object') {
+          const keys = Object.keys(campaignsData);
           const campaignsKey = keys.find(key => 
-            key.toLowerCase().includes('campaign') && Array.isArray(data[key])
+            key.toLowerCase().includes('campaign') && Array.isArray(campaignsData[key])
           );
           
           if (campaignsKey) {
             console.log(`✅ Encontrado array em: "${campaignsKey}"`);
-            data = data[campaignsKey];
+            campaignsData = campaignsData[campaignsKey];
           }
         }
       }
 
       // Se ainda não for array, vai para fallback
-      if (!Array.isArray(data)) {
+      if (!Array.isArray(campaignsData)) {
         throw new Error('Formato inválido da API analytics');
       }
 
       // Processa as campanhas
-      const campaigns = data
+      const campaigns = campaignsData
         .map((campaign: any) => {
           // Extrai ID - tenta várias possibilidades
           const campaignId = 
@@ -200,109 +217,13 @@ export class CampaignsService {
     }
   }
 
-  @Post()
-async getCampaigns(@Body() body: CampaignsBody) {
-  console.log('📥 Recebendo requisição para gerar relatório...');
-  
-  const { emailSnovio, emailsSnovio, startDate, endDate } = body;
-  const selectedEmails: string[] = emailsSnovio?.length ? emailsSnovio : emailSnovio ? [emailSnovio] : [];
-
-  if (!selectedEmails.length) {
-    throw new Error('Nenhum email Snovio informado');
-  }
-
-  console.log(`🎯 Processando ${selectedEmails.length} cliente(s)...`);
-  
-  const clients = await this.sheetsService.readClientsFromSheet();
-  const allData: any[] = [];
-  const countsByEmail: Record<string, number> = {};
-  
-  // Processa clientes em PARALELO
-  const clientPromises = selectedEmails.map(async (email) => {
-    console.log(`\n🔍 Iniciando processamento paralelo: ${email}`);
-    const client = clients.find((c) => c.emailSnovio === email);
-    
-    if (!client) {
-      console.warn(`⚠️ Cliente não encontrado: ${email}`);
-      return { data: [], counts: {} };
-    }
-
-    try {
-      // 1. Obtém token
-      const accessToken = await this.campaignsService.getAccessToken(
-        client.clientId,
-        client.clientSecret,
-      );
-      
-      // 2. Obtém TODAS as campanhas
-      const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
-      console.log(`📊 ${email}: ${campaigns.length} campanhas encontradas`);
-      
-      // 3. Processa aberturas EM PARALELO (nova função)
-      const emailsOpened = await this.campaignsService.getEmailsOpenedFast(
-        accessToken,
-        campaigns,
-        startDate,
-        endDate,
-      );
-      
-      console.log(`✅ ${email}: ${emailsOpened.length} aberturas no período`);
-      
-      // 4. Adiciona email do cliente
-      const withClient = emailsOpened.map((item) => ({
-        clientEmail: client.emailSnovio,
-        ...item,
-      }));
-      
-      // 5. Contabiliza
-      const clientCounts: Record<string, number> = {};
-      emailsOpened.forEach(item => {
-        const p = item.prospectEmail || '';
-        if (p) clientCounts[p] = (clientCounts[p] || 0) + 1;
-      });
-      
-      return { data: withClient, counts: clientCounts };
-      
-    } catch (err: any) {
-      console.error(`❌ Erro em ${email}:`, err.message);
-      return { data: [], counts: {} };
-    }
-  });
-  
-  // Aguarda TODOS os clientes processarem
-  const results = await Promise.all(clientPromises);
-  
-  // Consolida resultados
-  results.forEach(result => {
-    allData.push(...result.data);
-    Object.entries(result.counts).forEach(([email, count]) => {
-      countsByEmail[email] = (countsByEmail[email] || 0) + count;
-    });
-  });
-  
-  // Salva CSV e retorna
-  if (allData.length > 0) {
-    await this.campaignsService.saveToCsv(allData);
-  }
-  
-  console.log(`🏁 Processamento concluído! Total: ${allData.length} aberturas`);
-  
-  return {
-    success: true,
-    message: 'Relatório gerado com sucesso!',
-    totalOpenings: allData.length,
-    countsByEmail,
-    processedClients: selectedEmails.length,
-    clientsWithData: results.filter(r => r.data.length > 0).length,
-  };
-}
-
   // Parse dd/mm/yyyy
   private parseBrDate(brDate: string): Date {
     const [day, month, year] = brDate.split('/').map((n) => parseInt(n, 10));
     return new Date(year, month - 1, day);
   }
 
+  // FUNÇÃO ORIGINAL (mantida para compatibilidade)
   async getEmailsOpened(
     accessToken: string,
     campaignId: string,
@@ -332,7 +253,7 @@ async getCampaigns(@Body() body: CampaignsBody) {
           const day = String(visitedDate.getDate()).padStart(2, '0');
           const month = String(visitedDate.getMonth() + 1).padStart(2, '0');
           const year = visitedDate.getFullYear();
-          const formattedDate = `${day}-${month}-${year}`; // dd-mm-yyyy
+          const formattedDate = `${day}-${month}-${year}`;
 
           return {
             campaignId,
@@ -345,6 +266,89 @@ async getCampaigns(@Body() body: CampaignsBody) {
     } catch (err: any) {
       console.error('Erro ao obter aberturas:', err.message || err);
       throw new Error('Falha ao obter aberturas');
+    }
+  }
+
+  // NOVA FUNÇÃO RÁPIDA COM PARALELISMO
+  async getEmailsOpenedFast(
+    accessToken: string,
+    campaigns: Array<{id: string, name: string}>,
+    startDate: string,
+    endDate: string,
+  ) {
+    console.log(`🚀 Processando ${campaigns.length} campanhas em paralelo...`);
+    
+    const start = this.parseBrDate(startDate);
+    const end = this.parseBrDate(endDate);
+    
+    // Processa até 10 campanhas por lote
+    const BATCH_SIZE = 10;
+    const allData: any[] = [];
+    
+    for (let i = 0; i < campaigns.length; i += BATCH_SIZE) {
+      const batch = campaigns.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(campaigns.length / BATCH_SIZE);
+      
+      console.log(`📦 Lote ${batchNumber}/${totalBatches} (${batch.length} campanhas)`);
+      
+      const promises = batch.map(campaign => 
+        this.getSingleCampaignEmails(accessToken, campaign, start, end)
+      );
+      
+      const batchResults = await Promise.all(promises);
+      allData.push(...batchResults.flat());
+      
+      // Pequena pausa entre lotes
+      if (i + BATCH_SIZE < campaigns.length) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+    
+    console.log(`✅ Total de aberturas: ${allData.length}`);
+    return allData;
+  }
+
+  private async getSingleCampaignEmails(
+    accessToken: string,
+    campaign: {id: string, name: string},
+    start: Date,
+    end: Date
+  ) {
+    const url = 'https://api.snov.io/v1/get-emails-opened';
+    
+    try {
+      const { data } = await axios.get(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { campaignId: campaign.id },
+        timeout: 10000,
+      });
+
+      if (!Array.isArray(data)) return [];
+
+      return data
+        .filter((item: any) => {
+          const visitedAt = new Date(item.visitedAt);
+          return visitedAt >= start && visitedAt <= end;
+        })
+        .map((item: any) => {
+          const visitedDate = new Date(item.visitedAt);
+          const day = String(visitedDate.getDate()).padStart(2, '0');
+          const month = String(visitedDate.getMonth() + 1).padStart(2, '0');
+          const year = visitedDate.getFullYear();
+          const formattedDate = `${day}-${month}-${year}`;
+
+          return {
+            campaignId: campaign.id,
+            campaign: campaign.name || 'N/A',
+            prospectEmail: item.prospectEmail || '',
+            sourcePage: item.sourcePage || '',
+            visitedAt: formattedDate,
+          };
+        });
+    } catch (err: any) {
+      console.error(`❌ Campanha ${campaign.id}:`, err.message);
+      return [];
     }
   }
 
@@ -372,7 +376,7 @@ async getCampaigns(@Body() body: CampaignsBody) {
     console.log(`CSV gerado com sucesso em: ${csvPath}`);
   }
 
-    // Se em algum momento você quiser usar todos os clientes de uma vez
+  // Se em algum momento você quiser usar todos os clientes de uma vez
   async getCampaignsForAllClients(startDate: string, endDate: string) {
     const clients = await this.sheetsService.readClientsFromSheet();
     const allData: any[] = [];
@@ -391,8 +395,8 @@ async getCampaigns(@Body() body: CampaignsBody) {
             accessToken,
             campaign.id,
             campaign.name,
-            startDate, // dd/mm/yyyy
-            endDate,   // dd/mm/yyyy
+            startDate,
+            endDate,
           );
 
           const withClient = emailsOpened.map((item) => ({
@@ -413,7 +417,3 @@ async getCampaigns(@Body() body: CampaignsBody) {
     return allData;
   }
 }
-
-
-
-
