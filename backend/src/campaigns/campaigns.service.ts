@@ -90,24 +90,7 @@ export class CampaignsService {
   }
 }
 
-  async getUserCampaigns(accessToken: string) {
-    const url = 'https://api.snov.io/v1/get-user-campaigns';
-    try {
-      const { data } = await axios.get(url, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-      if (!Array.isArray(data)) return [];
-
-      return data.map((c: any) => ({
-        id: c.id,
-        name: c.name,
-      }));
-    } catch (err: any) {
-      console.error('Erro ao obter campanhas:', err.message || err);
-      throw new Error('Falha ao obter campanhas');
-    }
-  }
+  getUserCampaigns
 
   // Parse dd/mm/yyyy
   private parseBrDate(brDate: string): Date {
@@ -225,4 +208,5 @@ export class CampaignsService {
     return allData;
   }
 }
+
 
