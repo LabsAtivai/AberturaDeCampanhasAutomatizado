@@ -1,21 +1,27 @@
-# Etapa de build
-FROM node:20-alpine AS build
+# Etapa 1: Build do app
+FROM node:20-alpine AS builder
+
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install --legacy-peer-deps
-RUN npm install -g @vue/cli
+# Copia apenas os arquivos de dependências primeiro (aproveita cache)
+COPY frontend/package*.json ./
+RUN npm ci --omit=dev
 
-COPY . .
+# Copia o resto do código
+COPY frontend/ .
+
+# Roda o build de produção
 RUN npm run build
 
-# Etapa de produção
-FROM node:20-alpine AS production
-WORKDIR /app
+# Etapa 2: Imagem final leve para servir
+FROM nginx:alpine
 
-COPY --from=build /app/dist ./dist
-RUN npm install -g serve
+# Copia os arquivos compilados para o nginx
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-EXPOSE 4173
+# (Opcional) Se quiser trocar a porta ou config do nginx
+# COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
-CMD ["serve", "-s", "dist", "-l", "4173"]
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
