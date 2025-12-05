@@ -28,60 +28,65 @@ export class CampaignsController {
   }
 
   @Post()
-  async getCampaigns(@Body() body: CampaignsBody) {
-    const { emailSnovio, emailsSnovio, startDate, endDate } = body;
+async getCampaigns(@Body() body: CampaignsBody) {
+  console.log('📥 Recebendo requisição para gerar relatório...');
+  console.log('📥 Body recebido:', JSON.stringify(body, null, 2));
+  
+  const { emailSnovio, emailsSnovio, startDate, endDate } = body;
 
-    const selectedEmails: string[] = emailsSnovio?.length
-      ? emailsSnovio
-      : emailSnovio
-      ? [emailSnovio]
-      : [];
+  const selectedEmails: string[] = emailsSnovio?.length
+    ? emailsSnovio
+    : emailSnovio
+    ? [emailSnovio]
+    : [];
 
-    if (!selectedEmails.length) {
-      throw new Error('Nenhum email Snovio informado');
+  console.log('📝 Emails a processar:', selectedEmails);
+
+  if (!selectedEmails.length) {
+    console.error('❌ Nenhum email selecionado');
+    throw new Error('Nenhum email Snovio informado');
+  }
+
+  const allData: any[] = [];
+  const countsByEmail: Record<string, number> = {};
+
+  console.log('📋 Lendo clientes da planilha...');
+  const clients = await this.sheetsService.readClientsFromSheet();
+  console.log(`📊 Total de clientes na planilha: ${clients.length}`);
+  
+  for (const email of selectedEmails) {
+    console.log(`\n🔍 Processando: ${email}`);
+    const client = clients.find((c) => c.emailSnovio === email);
+    
+    if (!client) {
+      console.warn(`⚠️ Cliente não encontrado para emailSnovio: ${email}`);
+      console.warn(`📋 Clientes disponíveis:`, clients.map(c => c.emailSnovio));
+      continue;
     }
 
-    const allData: any[] = [];
-    const countsByEmail: Record<string, number> = {};
+    console.log(`✅ Cliente encontrado:`, {
+      email: client.email,
+      clientIdPreview: client.clientId?.slice(0, 8) + '...',
+      emailSnovio: client.emailSnovio,
+    });
 
-    const clients = await this.sheetsService.readClientsFromSheet();
-
-    for (const email of selectedEmails) {
-      const client = clients.find((c) => c.emailSnovio === email);
-      if (!client) {
-        console.warn(`Cliente não encontrado para emailSnovio: ${email}`);
-        continue;
-      }
-
+    try {
       const accessToken = await this.campaignsService.getAccessToken(
         client.clientId,
         client.clientSecret,
       );
+      
+      console.log(`✅ Token obtido para ${email}`);
+      
       const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
-
-      for (const campaign of campaigns) {
-        const emailsOpened = await this.campaignsService.getEmailsOpened(
-          accessToken,
-          campaign.id,
-          campaign.name,
-          startDate,
-          endDate,
-        );
-
-        const withClient = emailsOpened.map((item) => ({
-          clientEmail: client.emailSnovio,
-          ...item,
-        }));
-
-        allData.push(...withClient);
-
-        for (const item of emailsOpened) {
-          const p = item.prospectEmail || '';
-          if (!p) continue;
-          countsByEmail[p] = (countsByEmail[p] || 0) + 1;
-        }
-      }
+      console.log(`📊 Campanhas encontradas: ${campaigns.length}`);
+      
+      // ... resto do código ...
+    } catch (err: any) {
+      console.error(`❌ Erro ao processar ${email}:`, err.message);
+      console.error(`❌ Stack:`, err.stack);
     }
+  }
 
     // Salva CSV (caso haja dados)
     await this.campaignsService.saveToCsv(allData);
@@ -106,3 +111,4 @@ export class CampaignsController {
     return res.download(filePath, fileName);
   }
 }
+
