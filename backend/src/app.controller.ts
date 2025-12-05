@@ -1,26 +1,28 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
-import { CampaignsService } from './campaigns/campaigns.service';
-import { SheetsService } from './shared/sheets.service';
+import { Controller, Get } from '@nestjs/common';
 
-@Controller('api')
+@Controller()
 export class AppController {
-  constructor(
-    private readonly campaignsService: CampaignsService,
-    private readonly sheetsService: SheetsService,  // Injetando o SheetsService
-  ) {}
-
-  @Get('get-emails')  // Nova rota para retornar os Emails Snovio
-  async getEmails() {
-    const clients = await this.sheetsService.readClientsFromSheet();  // Lê os clientes da planilha
-    const emails = clients.map(client => client.emailSnovio);  // Pega os Emails Snovio
-    return emails;  // Retorna os Emails Snovio para o frontend
+  @Get('health')
+  getHealth() {
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      service: 'aberturas-backend'
+    };
   }
 
-  @Post('campaigns')
-  async getCampaigns(@Body() body: { emailSnovio: string; startDate: string; endDate: string }) {
-    const { emailSnovio, startDate, endDate } = body;
-    const campaignsData = await this.campaignsService.getCampaignsForAllClients(startDate, endDate);
-    await this.campaignsService.saveToCsv(campaignsData);
-    return { message: 'CSV gerado com sucesso!' };
+  @Get()
+  getHello() {
+    return {
+      message: 'API de Aberturas de Campanhas',
+      version: '1.0.0',
+      endpoints: {
+        getEmails: '/api/campaigns/get-emails',
+        generateReport: '/api/campaigns (POST)',
+        downloadCSV: '/api/campaigns/download',
+        testClient: '/api/campaigns/test/:emailSnovio',
+        health: '/api/health'
+      }
+    };
   }
 }
