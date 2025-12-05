@@ -1,11 +1,15 @@
 import { Module } from '@nestjs/common';
-
+import { ScheduleModule } from '@nestjs/schedule';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 import { CampaignsModule } from './campaigns/campaigns.module';
-import { SheetsService } from './shared/sheets.service';
 
 @Module({
-  imports: [CampaignsModule],
-  controllers: [],
-  providers: [SheetsService],
+  imports: [
+    ScheduleModule.forRoot(),
+    CampaignsModule, // 👈 importantíssimo
+  ],
+  controllers: [AppController],
+  providers: [AppService],
 })
 export class AppModule {}

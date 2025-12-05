@@ -9,7 +9,9 @@
         />
         <div class="app-header-text">
           <span class="app-title">Relatório de Aberturas</span>
-          <span class="app-subtitle">Monitoramento automático de campanhas Snov.io</span>
+          <span class="app-subtitle">
+            Monitoramento automático de campanhas Snov.io
+          </span>
         </div>
       </div>
     </header>
@@ -24,7 +26,6 @@
             arquivo <strong>CSV</strong> pronto para análise.
           </p>
 
-          <!-- Formulário principal -->
           <EmailForm />
         </section>
       </div>
@@ -71,7 +72,7 @@ body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
     Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  background: linear-gradient(135deg, #111111, #1f1f1f);
+  background: radial-gradient(circle at top left, #262626 0, #050505 55%);
   color: var(--ativa-white);
 }
 
@@ -81,13 +82,16 @@ body {
   flex-direction: column;
 }
 
+/* HEADER */
+
 .app-header {
   height: 64px;
   display: flex;
   align-items: center;
-  padding: 0 24px;
-  background: var(--ativa-black);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0 32px;
+  background: rgba(75, 71, 71, 0.96);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(8px);
 }
 
 .app-header-left {
@@ -97,8 +101,9 @@ body {
 }
 
 .app-logo {
-  height: 40px;
+  height: 60px; /* logo maior */
   width: auto;
+  transform: translateY(-1px);
 }
 
 .app-header-text {
@@ -117,43 +122,71 @@ body {
   color: rgba(255, 255, 255, 0.7);
 }
 
+/* CONTEÚDO PRINCIPAL */
+
 .app-main {
   flex: 1;
-  padding: 32px 16px;
+  padding: 32px 16px 24px;
   display: flex;
   justify-content: center;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .page-wrapper {
   width: 100%;
-  max-width: 720px;
+  max-width: 840px;
 }
+
+/* CARD PRINCIPAL */
 
 .card {
   background: var(--ativa-gray);
   color: #111;
-  border-radius: 12px;
-  padding: 24px 24px 28px;
-  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding: 28px 32px 32px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 122, 0, 0.22),
+    transparent 40%
+  );
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .card-title {
-  margin: 0 0 8px;
-  font-size: 22px;
+  margin: 0 0 4px;
+  font-size: 24px;
   font-weight: 600;
   color: var(--ativa-black);
 }
 
 .card-text {
-  margin: 0 0 20px;
+  margin: 0 0 22px;
   font-size: 14px;
-  color: #444;
+  color: #555;
+  max-width: 640px;
 }
 
+/* FOOTER */
+
 .app-footer {
-  padding: 12px 16px;
+  padding: 10px 16px;
   text-align: center;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.6);

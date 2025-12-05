@@ -1,9 +1,14 @@
-// src/campaigns/campaigns.controller.ts
 import { Controller, Post, Body, Get, Res } from '@nestjs/common';
 import { CampaignsService } from './campaigns.service';
 import { SheetsService } from '../shared/sheets.service';
 import type { Response } from 'express';
 
+interface CampaignsBody {
+  emailSnovio?: string;
+  emailsSnovio?: string[];
+  startDate: string; // dd/mm/yyyy
+  endDate: string;   // dd/mm/yyyy
+}
 
 @Controller('api/campaigns')
 export class CampaignsController {
@@ -15,55 +20,81 @@ export class CampaignsController {
   @Get('get-emails')
   async getEmails() {
     const clients = await this.sheetsService.readClientsFromSheet();
-    return clients.map((client) => client.emailSnovio); // options do select no front
+    // Agora devolve email + total de campanhas
+    return clients.map((client) => ({
+      emailSnovio: client.emailSnovio,
+      totalCampaigns: client.totalCampaigns || 0,
+    }));
   }
 
   @Post()
-  async getCampaigns(
-    @Body() body: { emailSnovio: string; startDate: string; endDate: string },
-  ) {
-    const { emailSnovio, startDate, endDate } = body;
+  async getCampaigns(@Body() body: CampaignsBody) {
+    const { emailSnovio, emailsSnovio, startDate, endDate } = body;
 
-    // 1) Encontra o cliente pela coluna Email Snovio
-    const clients = await this.sheetsService.readClientsFromSheet();
-    const client = clients.find((c) => c.emailSnovio === emailSnovio);
-    if (!client) {
-      throw new Error('Cliente não encontrado');
+    const selectedEmails: string[] = emailsSnovio?.length
+      ? emailsSnovio
+      : emailSnovio
+      ? [emailSnovio]
+      : [];
+
+    if (!selectedEmails.length) {
+      throw new Error('Nenhum email Snovio informado');
     }
 
-    // 2) Token + campanhas
-    const accessToken = await this.campaignsService.getAccessToken(
-      client.clientId,
-      client.clientSecret,
-    );
-    const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
-
-    // 3) Coleta aberturas e adiciona o clientEmail
     const allData: any[] = [];
-for (const campaign of campaigns) {
-  const emailsOpened = await this.campaignsService.getEmailsOpened(
-    accessToken,
-    campaign.id,
-    campaign.name,
-    startDate,
-    endDate,
-  );;
+    const countsByEmail: Record<string, number> = {};
 
-  const withClient = emailsOpened.map(item => ({
-    clientEmail: client.emailSnovio,
-    ...item,
-  }));
+    const clients = await this.sheetsService.readClientsFromSheet();
 
-  allData.push(...withClient);
-}
+    for (const email of selectedEmails) {
+      const client = clients.find((c) => c.emailSnovio === email);
+      if (!client) {
+        console.warn(`Cliente não encontrado para emailSnovio: ${email}`);
+        continue;
+      }
 
-    // 4) Salva CSV no servidor
+      const accessToken = await this.campaignsService.getAccessToken(
+        client.clientId,
+        client.clientSecret,
+      );
+      const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
+
+      for (const campaign of campaigns) {
+        const emailsOpened = await this.campaignsService.getEmailsOpened(
+          accessToken,
+          campaign.id,
+          campaign.name,
+          startDate,
+          endDate,
+        );
+
+        const withClient = emailsOpened.map((item) => ({
+          clientEmail: client.emailSnovio,
+          ...item,
+        }));
+
+        allData.push(...withClient);
+
+        for (const item of emailsOpened) {
+          const p = item.prospectEmail || '';
+          if (!p) continue;
+          countsByEmail[p] = (countsByEmail[p] || 0) + 1;
+        }
+      }
+    }
+
+    // Salva CSV (caso haja dados)
     await this.campaignsService.saveToCsv(allData);
 
-    return { message: 'CSV gerado com sucesso!' };
+    const totalOpenings = allData.length;
+
+    return {
+      message: 'CSV gerado com sucesso!',
+      totalOpenings,
+      countsByEmail,
+    };
   }
 
-  // NOVA ROTA: download do CSV
   @Get('download')
   async downloadCsv(@Res() res: Response) {
     const filePath = this.campaignsService.getCsvFilePath();

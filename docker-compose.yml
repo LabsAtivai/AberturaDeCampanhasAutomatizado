@@ -6,23 +6,21 @@ networks:
     external: true
 
 services:
-  aberturas-backend:
-    container_name: aberturas-backend
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    networks:
-      - ativaai
-    # se quiser persistir o CSV no host, descomente:
-    # volumes:
-    #   - ./backend/data:/usr/src/app
+ backend-aberturas:
+  build: ./backend
+  container_name: backend-aberturas
+  restart: unless-stopped
+  networks:
+    - ativaai
+  ports:
+    - "3000:3000"
 
-  aberturas-frontend:
-    container_name: aberturas-frontend
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    networks:
-      - ativaai
+frontend-aberturas:
+  build: ./frontend
+  container_name: frontend-aberturas
+  restart: unless-stopped
+  networks:
+    - ativaai
+  ports:
+    - "4173:4173"
+

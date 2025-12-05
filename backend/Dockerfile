@@ -2,14 +2,14 @@ FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
-# Copia package e lock e instala deps
+# Copia somente os arquivos que garantem instalação de packages primeiro (cache otimizado)
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --omit=dev
 
-# Copia o resto do código (inclui src, nest-cli.json, credentials.json, etc.)
+# Copia o restante do projeto
 COPY . .
 
-# Build do NestJS
+# Compila o NestJS
 RUN npm run build
 
 ENV NODE_ENV=production

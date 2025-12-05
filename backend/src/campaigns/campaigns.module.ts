@@ -1,11 +1,13 @@
+// src/campaigns/campaigns.module.ts
 import { Module } from '@nestjs/common';
 import { CampaignsController } from './campaigns.controller';
 import { CampaignsService } from './campaigns.service';
-import { SheetsService } from '../shared/sheets.service'; // Importando o SheetsService
+import { SheetsService } from '../shared/sheets.service';
 
 @Module({
-  imports: [],  // Se necessário, adicione outros módulos aqui
+  imports: [],
   controllers: [CampaignsController],
-  providers: [CampaignsService, SheetsService],  // Adicionando o SheetsService ao providers
+  providers: [CampaignsService, SheetsService],
+  exports: [CampaignsService, SheetsService], // 👈 exporta para outros módulos (AppModule) poderem usar
 })
 export class CampaignsModule {}
