@@ -90,7 +90,114 @@ export class CampaignsService {
   }
 }
 
-  getUserCampaigns
+    async getUserCampaigns(accessToken: string) {
+    console.log('📊 Obtendo campanhas com nomes...');
+    
+    // TENTA PRIMEIRO A NOVA API (get-campaign-analytics)
+    try {
+      const url = 'https://api.snov.io/v1/get-campaign-analytics';
+      const { data } = await axios.get(url, {
+        headers: { 
+          Authorization: `Bearer ${accessToken}`,
+          'Accept': 'application/json'
+        },
+        timeout: 20000,
+      });
+
+      console.log('✅ Resposta da API analytics recebida');
+      
+      // Verifica se é array
+      if (!Array.isArray(data)) {
+        console.warn('⚠️ Resposta não é array. Estrutura:', typeof data);
+        
+        // Se for objeto, tenta encontrar array dentro
+        if (data && typeof data === 'object') {
+          const keys = Object.keys(data);
+          const campaignsKey = keys.find(key => 
+            key.toLowerCase().includes('campaign') && Array.isArray(data[key])
+          );
+          
+          if (campaignsKey) {
+            console.log(`✅ Encontrado array em: "${campaignsKey}"`);
+            data = data[campaignsKey];
+          }
+        }
+      }
+
+      // Se ainda não for array, vai para fallback
+      if (!Array.isArray(data)) {
+        throw new Error('Formato inválido da API analytics');
+      }
+
+      // Processa as campanhas
+      const campaigns = data
+        .map((campaign: any) => {
+          // Extrai ID - tenta várias possibilidades
+          const campaignId = 
+            campaign.campaign_id || 
+            campaign.id || 
+            campaign.campaignId ||
+            campaign.campaignID;
+          
+          // Extrai NOME - tenta várias possibilidades
+          const campaignName = 
+            campaign.campaign_name || 
+            campaign.name || 
+            campaign.campaignName ||
+            campaign.campaign ||
+            'Campanha sem nome';
+
+          if (!campaignId) {
+            console.warn('Campanha sem ID:', campaign);
+            return null;
+          }
+
+          return {
+            id: String(campaignId),
+            name: campaignName,
+          };
+        })
+        .filter((campaign: any) => campaign !== null);
+
+      console.log(`✅ ${campaigns.length} campanhas encontradas com nomes`);
+      
+      if (campaigns.length > 0) {
+        console.log('📋 Exemplo:', campaigns[0]);
+      }
+      
+      return campaigns;
+
+    } catch (analyticsErr: any) {
+      console.log(`❌ API analytics falhou: ${analyticsErr.message}`);
+      console.log('🔄 Usando API fallback (get-user-campaigns)...');
+      
+      // FALLBACK: usa a API antiga
+      try {
+        const fallbackUrl = 'https://api.snov.io/v1/get-user-campaigns';
+        const { data } = await axios.get(fallbackUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 15000,
+        });
+
+        if (!Array.isArray(data)) {
+          console.warn('Fallback não retornou array');
+          return [];
+        }
+
+        const campaigns = data.map((c: any) => ({
+          id: c.id || 'unknown',
+          name: c.name || 'Campanha sem nome',
+        }));
+
+        console.log(`✅ Fallback: ${campaigns.length} campanhas`);
+        return campaigns;
+        
+      } catch (fallbackErr: any) {
+        console.error('❌ Ambas APIs falharam:', fallbackErr.message);
+        throw new Error('Não foi possível obter campanhas');
+      }
+    }
+  }
 
   // Parse dd/mm/yyyy
   private parseBrDate(brDate: string): Date {
@@ -208,5 +315,6 @@ export class CampaignsService {
     return allData;
   }
 }
+
 
 
