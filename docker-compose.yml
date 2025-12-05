@@ -1,19 +1,33 @@
-version: "3.8"    # mudei para 3.8 (mais compatível)
+version: "3.8"
 
 services:
   backend-aberturas:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        - NODE_ENV=production
     volumes:
       - /srv/credentials/credentials.json:/usr/src/app/credentials.json
-    build: ./backend
+      # Para desenvolvimento, descomente:
+      # - ./backend/src:/usr/src/app/src
+      # - ./backend/nest-cli.json:/usr/src/app/nest-cli.json
     container_name: backend-aberturas
     restart: unless-stopped
     ports:
       - "3001:3000"
+    environment:
+      - NODE_ENV=production
+      - TZ=America/Sao_Paulo
     networks:
       - ativaai
+    # Build com cache otimizado
+    command: node dist/main
 
   frontend-aberturas:
-    build: ./frontend
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: frontend-aberturas
     restart: unless-stopped
     ports:
@@ -21,13 +35,6 @@ services:
     networks:
       - ativaai
 
-
-  
-      
-
 networks:
   ativaai:
     external: true
-
-
-
