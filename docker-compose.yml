@@ -9,9 +9,6 @@ services:
         - NODE_ENV=production
     volumes:
       - /srv/credentials/credentials.json:/usr/src/app/credentials.json
-      # Para desenvolvimento, descomente:
-      # - ./backend/src:/usr/src/app/src
-      # - ./backend/nest-cli.json:/usr/src/app/nest-cli.json
     container_name: backend-aberturas
     restart: unless-stopped
     ports:
@@ -19,9 +16,13 @@ services:
     environment:
       - NODE_ENV=production
       - TZ=America/Sao_Paulo
+      - DB_HOST=165.22.37.195
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=sari1548
+      - DB_NAME=extensao
     networks:
       - ativaai
-    # Build com cache otimizado
     command: node dist/main
 
   frontend-aberturas:
