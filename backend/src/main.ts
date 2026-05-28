@@ -1,16 +1,35 @@
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  
-  // Configuração de CORS mais permissiva
+  const logger = new Logger('Bootstrap');
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      exceptionFactory: (errors) => {
+        const messages = errors.flatMap((e) =>
+          Object.values(e.constraints || {}),
+        );
+        const { BadRequestException } = require('@nestjs/common');
+        return new BadRequestException(messages);
+      },
+    }),
+  );
+
   app.enableCors({
     origin: [
       'https://aberturas.labsativa.com.br',
       'http://aberturas.labsativa.com.br',
       'http://localhost:4173',
-      'http://localhost:8080'
+      'http://localhost:8080',
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
@@ -20,16 +39,13 @@ async function bootstrap() {
       'Content-Type',
       'Accept',
       'Authorization',
-      'Access-Control-Allow-Origin',
-      'Access-Control-Allow-Credentials'
     ],
     exposedHeaders: ['Content-Disposition'],
   });
 
-  // Prefixo global para todas as rotas
   app.setGlobalPrefix('api');
 
   await app.listen(3000);
-  console.log('🚀 Backend rodando em http://localhost:3000');
+  logger.log('Backend rodando em http://localhost:3000');
 }
 bootstrap();
