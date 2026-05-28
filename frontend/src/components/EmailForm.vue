@@ -137,6 +137,7 @@ export default {
       errorMessage: '',
       totalOpenings: 0,
       emailCounts: [],
+      campaignCounts: [],
       showStats: false,
     };
   },
@@ -193,6 +194,7 @@ export default {
       this.warningMessage = '';
       this.totalOpenings = 0;
       this.emailCounts = [];
+      this.campaignCounts = [];
       this.showStats = false;
       this.isLoading = true;
       this.loadingText = 'Consultando campanhas...';

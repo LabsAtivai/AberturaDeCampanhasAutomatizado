@@ -204,7 +204,7 @@ export class CampaignsService {
 
         const campaigns = data.map((c: any) => ({
           id: c.id || 'unknown',
-          name: c.name || 'Campanha sem nome',
+          name: c.campaign || c.name || 'Campanha sem nome',
         }));
 
         console.log(`✅ Fallback: ${campaigns.length} campanhas`);

@@ -50,6 +50,7 @@ export class CampaignsController {
     const clients = await this.sheetsService.readClientsFromSheet();
     const allData: any[] = [];
     const countsByEmail: Record<string, number> = {};
+    const countsByCampaign: Record<string, number> = {};
     
     // Processa clientes em PARALELO
     const clientPromises = selectedEmails.map(async (email) => {
@@ -58,7 +59,7 @@ export class CampaignsController {
       
       if (!client) {
         console.warn(`⚠️ Cliente não encontrado: ${email}`);
-        return { data: [], counts: {} };
+        return { data: [], counts: {}, campaignCounts: {} };
       }
 
       try {
@@ -71,7 +72,7 @@ export class CampaignsController {
         console.log(`📊 ${email}: ${campaigns.length} campanhas`);
         
         if (campaigns.length === 0) {
-          return { data: [], counts: {} };
+          return { data: [], counts: {}, campaignCounts: {} };
         }
         
         const emailsOpened = await this.campaignsService.getEmailsOpenedFast(
@@ -89,16 +90,20 @@ export class CampaignsController {
         }));
         
         const clientCounts: Record<string, number> = {};
+        const clientCampaignCounts: Record<string, number> = {};
         emailsOpened.forEach(item => {
           const p = item.prospectEmail || '';
           if (p) clientCounts[p] = (clientCounts[p] || 0) + 1;
+          
+          const c = item.campaign || 'Desconhecida';
+          clientCampaignCounts[c] = (clientCampaignCounts[c] || 0) + 1;
         });
         
-        return { data: withClient, counts: clientCounts };
+        return { data: withClient, counts: clientCounts, campaignCounts: clientCampaignCounts };
         
       } catch (err: any) {
         console.error(`❌ Erro em ${email}:`, err.message);
-        return { data: [], counts: {} };
+        return { data: [], counts: {}, campaignCounts: {} };
       }
     });
     
@@ -108,7 +113,10 @@ export class CampaignsController {
     results.forEach(result => {
       allData.push(...result.data);
       Object.entries(result.counts).forEach(([email, count]) => {
-        countsByEmail[email] = (countsByEmail[email] || 0) + count;
+        countsByEmail[email] = (countsByEmail[email] || 0) + (count as number);
+      });
+      Object.entries(result.campaignCounts).forEach(([campaign, count]) => {
+        countsByCampaign[campaign] = (countsByCampaign[campaign] || 0) + (count as number);
       });
     });
     
@@ -123,6 +131,7 @@ export class CampaignsController {
       message: allData.length > 0 ? 'Relatório gerado!' : 'Nenhuma abertura',
       totalOpenings: allData.length,
       countsByEmail,
+      countsByCampaign,
       processedClients: selectedEmails.length,
     };
   }
