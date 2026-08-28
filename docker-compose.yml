@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  backend-aberturas:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        - NODE_ENV=production
+    container_name: backend-aberturas
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+      - TZ=America/Sao_Paulo
+      - DB_HOST=165.22.37.195
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=sari1548
+      - DB_NAME=extensao
+      - CREDENTIALS_API_URL=http://snov-am-api:8000
+      - CREDENTIALS_API_KEY=${CREDENTIALS_API_KEY}
+    networks:
+      - ativaai
+    command: node dist/main
+
+  frontend-aberturas:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend-aberturas
+    restart: unless-stopped
+    ports:
+      - "4173:4173"
+    networks:
+      - ativaai
+
+networks:
+  ativaai:
+    external: true

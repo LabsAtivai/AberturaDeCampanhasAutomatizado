@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+
+# dotenv environment variable files
+.env
+.env.*
+!.env.example
+
+backend/credentials.json
+backend/AberturasDeCampanhas.csv
