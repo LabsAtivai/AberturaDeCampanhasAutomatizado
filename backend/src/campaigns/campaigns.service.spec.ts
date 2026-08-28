@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CampaignsService } from './campaigns.service';
-import { SheetsService } from '../shared/sheets.service';
+import { CredentialsApiService } from '../shared/credentials-api.service';
 import { ConfigModule } from '@nestjs/config';
 
-const mockSheetsService = { readClientsFromSheet: jest.fn(), updateClientCampaignCount: jest.fn() };
+const mockCredentialsApiService = { getActiveClients: jest.fn() };
 
 describe('CampaignsService', () => {
   let service: CampaignsService;
@@ -13,7 +13,7 @@ describe('CampaignsService', () => {
       imports: [ConfigModule.forRoot({ isGlobal: true })],
       providers: [
         CampaignsService,
-        { provide: SheetsService, useValue: mockSheetsService },
+        { provide: CredentialsApiService, useValue: mockCredentialsApiService },
       ],
     }).compile();
 
@@ -44,6 +44,7 @@ describe('CampaignsService', () => {
     it('gera CSV com BOM e cabeçalho correto', () => {
       const data = [{
         clientEmail: 'test@ativa.ai',
+        campaignId: 'campaign-1',
         campaign: 'Campanha A',
         prospectEmail: 'prospect@empresa.com',
         sourcePage: 'https://linkedin.com/in/test',

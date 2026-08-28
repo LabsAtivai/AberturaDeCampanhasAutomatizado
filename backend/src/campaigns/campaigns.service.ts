@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
-import { SheetsService } from '../shared/sheets.service';
+import { CredentialsApiService } from '../shared/credentials-api.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 interface Campaign {
@@ -23,7 +23,15 @@ export class CampaignsService {
   // Cache de tokens por clientId → { token, expiresAt }
   private readonly tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-  constructor(private readonly sheetsService: SheetsService) {}
+  // Cache em memória da contagem de campanhas por cliente, atualizado pelo cron diário
+  // (substitui a antiga escrita na coluna "totalCampanhas" do Google Sheets).
+  private readonly campaignCounts = new Map<string, number>();
+
+  constructor(private readonly credentialsApiService: CredentialsApiService) {}
+
+  getCampaignCount(emailSnovio: string): number {
+    return this.campaignCounts.get(emailSnovio) || 0;
+  }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -68,12 +76,12 @@ export class CampaignsService {
   async refreshCampaignCounts() {
     this.logger.log('[CRON] Atualizando contagem de campanhas...');
     try {
-      const clients = await this.sheetsService.readClientsFromSheet();
+      const clients = await this.credentialsApiService.getActiveClients();
       for (const client of clients) {
         try {
           const accessToken = await this.getAccessToken(client.clientId, client.clientSecret);
           const campaigns = await this.getUserCampaigns(accessToken);
-          await this.sheetsService.updateClientCampaignCount(client.emailSnovio, campaigns.length);
+          this.campaignCounts.set(client.emailSnovio, campaigns.length);
         } catch (err: any) {
           this.logger.error(`[CRON] Falha em ${client.emailSnovio}: ${err?.message}`);
         }

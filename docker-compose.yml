@@ -7,8 +7,6 @@ services:
       dockerfile: Dockerfile
       args:
         - NODE_ENV=production
-    volumes:
-      - /srv/credentials/credentials.json:/usr/src/app/credentials.json
     container_name: backend-aberturas
     restart: unless-stopped
     ports:
@@ -21,6 +19,8 @@ services:
       - DB_USER=root
       - DB_PASSWORD=sari1548
       - DB_NAME=extensao
+      - CREDENTIALS_API_URL=http://snov-am-api:8000
+      - CREDENTIALS_API_KEY=${CREDENTIALS_API_KEY}
     networks:
       - ativaai
     command: node dist/main

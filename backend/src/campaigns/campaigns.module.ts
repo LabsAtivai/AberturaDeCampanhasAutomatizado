@@ -2,12 +2,12 @@
 import { Module } from '@nestjs/common';
 import { CampaignsController } from './campaigns.controller';
 import { CampaignsService } from './campaigns.service';
-import { SheetsService } from '../shared/sheets.service';
+import { CredentialsApiService } from '../shared/credentials-api.service';
 
 @Module({
   imports: [],
   controllers: [CampaignsController],
-  providers: [CampaignsService, SheetsService],
-  exports: [CampaignsService, SheetsService], // 👈 exporta para outros módulos (AppModule) poderem usar
+  providers: [CampaignsService, CredentialsApiService],
+  exports: [CampaignsService, CredentialsApiService], // 👈 exporta para outros módulos (AppModule) poderem usar
 })
 export class CampaignsModule {}

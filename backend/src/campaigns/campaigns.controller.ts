@@ -10,7 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { CampaignsService } from './campaigns.service';
-import { SheetsService } from '../shared/sheets.service';
+import { CredentialsApiService } from '../shared/credentials-api.service';
 import { GetCampaignsDto } from './dto/get-campaigns.dto';
 import type { Response } from 'express';
 
@@ -20,15 +20,15 @@ export class CampaignsController {
 
   constructor(
     private readonly campaignsService: CampaignsService,
-    private readonly sheetsService: SheetsService,
+    private readonly credentialsApiService: CredentialsApiService,
   ) {}
 
   @Get('get-emails')
   async getEmails() {
-    const clients = await this.sheetsService.readClientsFromSheet();
+    const clients = await this.credentialsApiService.getActiveClients();
     return clients.map((c) => ({
       emailSnovio: c.emailSnovio,
-      totalCampaigns: c.totalCampaigns || 0,
+      totalCampaigns: this.campaignsService.getCampaignCount(c.emailSnovio),
     }));
   }
 
@@ -39,7 +39,7 @@ export class CampaignsController {
 
     this.logger.log(`Processando ${emailsSnovio.length} cliente(s)...`);
 
-    const clients = await this.sheetsService.readClientsFromSheet();
+    const clients = await this.credentialsApiService.getActiveClients();
 
     const allData: Array<any> = [];
     const countsByEmail: Record<string, number> = {};
@@ -122,7 +122,7 @@ export class CampaignsController {
   async downloadCsv(@Body() body: GetCampaignsDto, @Res() res: Response) {
     const { emailsSnovio, startDate, endDate } = body;
 
-    const clients = await this.sheetsService.readClientsFromSheet();
+    const clients = await this.credentialsApiService.getActiveClients();
     const allData: Array<any> = [];
 
     await Promise.all(
@@ -158,7 +158,7 @@ export class CampaignsController {
 
   @Get('test/:emailSnovio')
   async testClient(@Param('emailSnovio') emailSnovio: string) {
-    const clients = await this.sheetsService.readClientsFromSheet();
+    const clients = await this.credentialsApiService.getActiveClients();
     const client = clients.find((c) => c.emailSnovio === emailSnovio);
 
     if (!client) {
