@@ -165,19 +165,37 @@ export class CampaignsService {
 
     this.logger.log(`Processando ${campaigns.length} campanhas em paralelo...`);
 
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 5;
     const all: EmailOpening[] = [];
+    let failedCount = 0;
 
     for (let i = 0; i < campaigns.length; i += BATCH_SIZE) {
       const batch = campaigns.slice(i, i + BATCH_SIZE);
       const results = await Promise.all(
         batch.map((c) => this.getSingleCampaignEmails(accessToken, c, start, end)),
       );
-      all.push(...results.flat());
+      results.forEach((r) => {
+        if (r.failed) failedCount++;
+        all.push(...r.emails);
+      });
 
       if (i + BATCH_SIZE < campaigns.length) {
-        await this.sleep(300);
+        await this.sleep(800);
       }
+    }
+
+    if (failedCount > 0) {
+      this.logger.error(
+        `${failedCount} de ${campaigns.length} campanhas falharam ao buscar aberturas (provável rate limit da Snov.io).`,
+      );
+    }
+
+    // Falha total (todas as campanhas erraram) não é "zero aberturas" — é indisponibilidade
+    // da Snov.io. Propaga erro em vez de devolver relatório/CSV vazio como se fosse sucesso.
+    if (campaigns.length > 0 && failedCount === campaigns.length) {
+      throw new Error(
+        `Falha ao consultar a Snov.io: todas as ${campaigns.length} campanhas retornaram erro.`,
+      );
     }
 
     this.logger.log(`Total de aberturas coletadas: ${all.length}`);
@@ -189,7 +207,7 @@ export class CampaignsService {
     campaign: Campaign,
     start: Date,
     end: Date,
-  ): Promise<EmailOpening[]> {
+  ): Promise<{ emails: EmailOpening[]; failed: boolean }> {
     try {
       const { data } = await this.withRetry(() =>
         axios.get('https://api.snov.io/v1/get-emails-opened', {
@@ -199,9 +217,9 @@ export class CampaignsService {
         }),
       );
 
-      if (!Array.isArray(data)) return [];
+      if (!Array.isArray(data)) return { emails: [], failed: false };
 
-      return data
+      const emails = data
         .filter((item: any) => {
           const d = new Date(item.visitedAt);
           return d >= start && d <= end;
@@ -213,9 +231,11 @@ export class CampaignsService {
           sourcePage: item.sourcePage || '',
           visitedAt: this.formatDate(new Date(item.visitedAt)),
         }));
+
+      return { emails, failed: false };
     } catch (err: any) {
       this.logger.error(`Campanha ${campaign.id} (${campaign.name}): ${err.message}`);
-      return [];
+      return { emails: [], failed: true };
     }
   }
 

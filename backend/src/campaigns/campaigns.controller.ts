@@ -86,16 +86,19 @@ export class CampaignsController {
             if (item.campaign) localCampaign[item.campaign] = (localCampaign[item.campaign] || 0) + 1;
           });
 
-          return { data: withClient, countsByEmail: localEmail, countsByCampaign: localCampaign };
+          return { data: withClient, countsByEmail: localEmail, countsByCampaign: localCampaign, failed: false };
         } catch (err: any) {
           this.logger.error(`Erro em ${email}: ${err.message}`);
-          return { data: [], countsByEmail: {}, countsByCampaign: {} };
+          return { data: [], countsByEmail: {}, countsByCampaign: {}, failed: true };
         }
       }),
     );
 
-    results.forEach((r) => {
+    const failedEmails: string[] = [];
+
+    results.forEach((r, idx) => {
       allData.push(...r.data);
+      if (r.failed) failedEmails.push(emailsSnovio[idx]);
       Object.entries(r.countsByEmail).forEach(([k, v]) => {
         countsByEmail[k] = (countsByEmail[k] || 0) + (v as number);
       });
@@ -107,12 +110,18 @@ export class CampaignsController {
     this.logger.log(`Total de aberturas: ${allData.length}`);
 
     return {
-      success: true,
-      message: allData.length > 0 ? 'Relatório gerado!' : 'Nenhuma abertura encontrada no período.',
+      success: failedEmails.length < emailsSnovio.length,
+      message:
+        failedEmails.length > 0
+          ? `Falha ao consultar a Snov.io para: ${failedEmails.join(', ')}. Resultado pode estar incompleto.`
+          : allData.length > 0
+            ? 'Relatório gerado!'
+            : 'Nenhuma abertura encontrada no período.',
       totalOpenings: allData.length,
       countsByEmail,
       countsByCampaign,
       processedClients: emailsSnovio.length,
+      failedEmails,
     };
   }
 
@@ -124,6 +133,7 @@ export class CampaignsController {
 
     const clients = await this.credentialsApiService.getActiveClients();
     const allData: Array<any> = [];
+    const failedEmails: string[] = [];
 
     await Promise.all(
       emailsSnovio.map(async (email) => {
@@ -144,9 +154,21 @@ export class CampaignsController {
           emailsOpened.forEach((item) => allData.push({ clientEmail: email, ...item }));
         } catch (err: any) {
           this.logger.error(`Download - Erro em ${email}: ${err.message}`);
+          failedEmails.push(email);
         }
       }),
     );
+
+    // Todos os clientes falharam (ex.: rate limit da Snov.io) — não devolve CSV vazio como sucesso.
+    if (failedEmails.length > 0 && failedEmails.length === emailsSnovio.length) {
+      res.status(HttpStatus.BAD_GATEWAY).json({
+        success: false,
+        message:
+          'Falha ao consultar a Snov.io para todos os clientes selecionados. Tente novamente em instantes.',
+        failedEmails,
+      });
+      return;
+    }
 
     const buffer = this.campaignsService.generateCsvBuffer(allData);
 
