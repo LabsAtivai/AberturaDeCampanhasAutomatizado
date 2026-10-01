@@ -248,10 +248,14 @@ export default {
           endDate: end,
         });
 
-        const { totalOpenings, countsByEmail, countsByCampaign } = res.data || {};
+        const { totalOpenings, countsByEmail, countsByCampaign, incomplete, message } = res.data || {};
         this.totalOpenings = totalOpenings || 0;
         this.countsByEmail = countsByEmail || {};
         this.countsByCampaign = countsByCampaign || {};
+
+        if (incomplete) {
+          this.warningMessage = message || 'Relatório possivelmente incompleto. Tente novamente.';
+        }
 
         if (!this.totalOpenings) {
           this.warningMessage = 'Nenhuma abertura encontrada no período informado.';
@@ -267,6 +271,11 @@ export default {
             startDate: start,
             endDate: end,
           }, { responseType: 'blob' });
+
+          if (file.headers && file.headers['x-report-incomplete'] === 'true') {
+            this.warningMessage =
+              'O CSV pode estar incompleto: algumas campanhas não puderam ser consultadas. Tente novamente em instantes.';
+          }
 
           const blob = new Blob([file.data], { type: 'text/csv;charset=utf-8;' });
           const url = window.URL.createObjectURL(blob);

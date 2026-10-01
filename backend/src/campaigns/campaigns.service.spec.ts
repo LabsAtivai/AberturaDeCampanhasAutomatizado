@@ -24,19 +24,20 @@ describe('CampaignsService', () => {
     expect(service).toBeDefined();
   });
 
-  describe('parseBrDate', () => {
-    it('converte dd/mm/yyyy corretamente', () => {
-      const d = (service as any).parseBrDate('15/06/2024');
-      expect(d.getFullYear()).toBe(2024);
-      expect(d.getMonth()).toBe(5);
-      expect(d.getDate()).toBe(15);
+  describe('datas em BRT', () => {
+    it('início do dia BRT = 03:00 UTC', () => {
+      const ms = (service as any).parseBrDateStartMs('15/06/2024');
+      expect(new Date(ms).toISOString()).toBe('2024-06-15T03:00:00.000Z');
     });
-  });
 
-  describe('formatDate', () => {
-    it('formata data como dd-mm-yyyy', () => {
-      const d = new Date(2024, 5, 5);
-      expect((service as any).formatDate(d)).toBe('05-06-2024');
+    it('fim do dia BRT = 02:59:59.999 UTC do dia seguinte', () => {
+      const ms = (service as any).parseBrDateEndMs('15/06/2024');
+      expect(new Date(ms).toISOString()).toBe('2024-06-16T02:59:59.999Z');
+    });
+
+    it('formata UTC em BRT como dd-mm-yyyy (01:00 UTC ainda é o dia anterior)', () => {
+      const ms = Date.parse('2024-06-06T01:00:00Z');
+      expect((service as any).formatBrt(ms)).toBe('05-06-2024');
     });
   });
 

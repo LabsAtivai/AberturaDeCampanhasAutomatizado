@@ -9,7 +9,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { CampaignsService } from './campaigns.service';
+import { CampaignsService, FailedCampaign } from './campaigns.service';
 import { CredentialsApiService } from '../shared/credentials-api.service';
 import { GetCampaignsDto } from './dto/get-campaigns.dto';
 import type { Response } from 'express';
@@ -44,6 +44,7 @@ export class CampaignsController {
     const allData: Array<any> = [];
     const countsByEmail: Record<string, number> = {};
     const countsByCampaign: Record<string, number> = {};
+    const failedCampaigns: Array<FailedCampaign & { clientEmail: string }> = [];
 
     const results = await Promise.all(
       emailsSnovio.map(async (email) => {
@@ -66,12 +67,14 @@ export class CampaignsController {
             return { data: [], countsByEmail: {}, countsByCampaign: {} };
           }
 
-          const emailsOpened = await this.campaignsService.getEmailsOpenedFast(
-            accessToken,
-            campaigns,
-            startDate,
-            endDate,
-          );
+          const { emails: emailsOpened, failedCampaigns: failed } =
+            await this.campaignsService.getEmailsOpenedFast(
+              accessToken,
+              campaigns,
+              startDate,
+              endDate,
+            );
+          failedCampaigns.push(...failed.map((f) => ({ ...f, clientEmail: email })));
 
           const withClient = emailsOpened.map((item) => ({
             clientEmail: email,
@@ -109,12 +112,16 @@ export class CampaignsController {
 
     this.logger.log(`Total de aberturas: ${allData.length}`);
 
+    const incomplete = failedEmails.length > 0 || failedCampaigns.length > 0;
+
     return {
       success: failedEmails.length < emailsSnovio.length,
       message:
         failedEmails.length > 0
           ? `Falha ao consultar a Snov.io para: ${failedEmails.join(', ')}. Resultado pode estar incompleto.`
-          : allData.length > 0
+          : failedCampaigns.length > 0
+            ? `${failedCampaigns.length} campanha(s) não puderam ser consultadas. Resultado pode estar incompleto.`
+            : allData.length > 0
             ? 'Relatório gerado!'
             : 'Nenhuma abertura encontrada no período.',
       totalOpenings: allData.length,
@@ -122,6 +129,8 @@ export class CampaignsController {
       countsByCampaign,
       processedClients: emailsSnovio.length,
       failedEmails,
+      failedCampaigns,
+      incomplete,
     };
   }
 
@@ -134,6 +143,7 @@ export class CampaignsController {
     const clients = await this.credentialsApiService.getActiveClients();
     const allData: Array<any> = [];
     const failedEmails: string[] = [];
+    let failedCampaignsCount = 0;
 
     await Promise.all(
       emailsSnovio.map(async (email) => {
@@ -145,12 +155,14 @@ export class CampaignsController {
             client.clientSecret,
           );
           const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
-          const emailsOpened = await this.campaignsService.getEmailsOpenedFast(
-            accessToken,
-            campaigns,
-            startDate,
-            endDate,
-          );
+          const { emails: emailsOpened, failedCampaigns } =
+            await this.campaignsService.getEmailsOpenedFast(
+              accessToken,
+              campaigns,
+              startDate,
+              endDate,
+            );
+          failedCampaignsCount += failedCampaigns.length;
           emailsOpened.forEach((item) => allData.push({ clientEmail: email, ...item }));
         } catch (err: any) {
           this.logger.error(`Download - Erro em ${email}: ${err.message}`);
@@ -175,6 +187,8 @@ export class CampaignsController {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="AberturasDeCampanhas.csv"');
     res.setHeader('Content-Length', buffer.length);
+    // Sinaliza ao frontend que o CSV pode estar incompleto (clientes/campanhas com falha).
+    res.setHeader('X-Report-Incomplete', String(failedEmails.length > 0 || failedCampaignsCount > 0));
     res.send(buffer);
   }
 

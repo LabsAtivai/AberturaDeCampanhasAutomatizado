@@ -40,7 +40,7 @@ async function bootstrap() {
       'Accept',
       'Authorization',
     ],
-    exposedHeaders: ['Content-Disposition'],
+    exposedHeaders: ['Content-Disposition', 'X-Report-Incomplete'],
   });
 
   app.setGlobalPrefix('api');
