@@ -12,6 +12,12 @@ export interface CredentialClient {
 
 @Injectable()
 export class CredentialsApiService {
+  // Lista de contas + credenciais muda raramente; evita 1 + N chamadas a cada requisição.
+  private readonly cacheTtlMs = 10 * 60 * 1000;
+  private readonly credentialsConcurrency = 10;
+  private cache: { clients: CredentialClient[]; expiresAt: number } | null = null;
+  private inFlight: Promise<CredentialClient[]> | null = null;
+
   private client(): AxiosInstance {
     const baseURL = process.env.CREDENTIALS_API_URL;
     const apiKey = process.env.CREDENTIALS_API_KEY;
@@ -25,6 +31,7 @@ export class CredentialsApiService {
     return axios.create({
       baseURL,
       headers: { 'X-API-Key': apiKey },
+      timeout: 15000,
     });
   }
 
@@ -50,29 +57,62 @@ export class CredentialsApiService {
     return data;
   }
 
-  // Substitui a antiga leitura da aba "aberturas" do Google Sheets.
-  // Retorna o mesmo formato consumido pelo resto do módulo: { email, clientId, clientSecret, emailSnovio, senha }
-  async getActiveClients(): Promise<CredentialClient[]> {
+  private async loadActiveClients(): Promise<CredentialClient[]> {
     const http = this.client();
     const accounts = await this.fetchActiveAccounts(http);
-
     const clients: CredentialClient[] = [];
-    for (const account of accounts) {
-      try {
-        const creds = await this.fetchCredentials(http, account.id);
-        clients.push({
-          id: account.id,
-          email: account.email,
-          clientId: creds.snov_id,
-          clientSecret: creds.snov_secret,
-          emailSnovio: creds.snov_email,
-          senha: creds.snov_password,
-        });
-      } catch (err: any) {
-        console.error(`Erro ao buscar credencial de ${account.email}:`, err.message);
-      }
+
+    // Busca credenciais em lotes paralelos (antes era sequencial: 536 chamadas em fila).
+    for (let i = 0; i < accounts.length; i += this.credentialsConcurrency) {
+      const batch = accounts.slice(i, i + this.credentialsConcurrency);
+      const results = await Promise.all(
+        batch.map(async (account) => {
+          try {
+            const creds = await this.fetchCredentials(http, account.id);
+            return {
+              id: account.id,
+              email: account.email,
+              clientId: creds.snov_id,
+              clientSecret: creds.snov_secret,
+              emailSnovio: creds.snov_email,
+              senha: creds.snov_password,
+            } as CredentialClient;
+          } catch (err: any) {
+            console.error(`Erro ao buscar credencial de ${account.email}:`, err.message);
+            return null;
+          }
+        }),
+      );
+      for (const r of results) if (r) clients.push(r);
     }
 
     return clients.filter((c) => c.clientId && c.clientSecret && c.emailSnovio);
+  }
+
+  // Substitui a antiga leitura da aba "aberturas" do Google Sheets.
+  // Retorna o mesmo formato consumido pelo resto do módulo: { email, clientId, clientSecret, emailSnovio, senha }
+  async getActiveClients(forceRefresh = false): Promise<CredentialClient[]> {
+    if (!forceRefresh && this.cache && this.cache.expiresAt > Date.now()) {
+      return this.cache.clients;
+    }
+
+    // Requisições simultâneas compartilham a mesma carga.
+    if (!this.inFlight) {
+      this.inFlight = this.loadActiveClients()
+        .then((clients) => {
+          this.cache = { clients, expiresAt: Date.now() + this.cacheTtlMs };
+          return clients;
+        })
+        .finally(() => {
+          this.inFlight = null;
+        });
+    }
+
+    return this.inFlight;
+  }
+
+  async getClientByEmailSnovio(emailSnovio: string): Promise<CredentialClient | undefined> {
+    const clients = await this.getActiveClients();
+    return clients.find((c) => c.emailSnovio === emailSnovio);
   }
 }

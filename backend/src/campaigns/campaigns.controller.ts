@@ -1,14 +1,26 @@
-import { Controller, Post, Body, Get, Res, Param } from '@nestjs/common';
-import { CampaignsService } from './campaigns.service';
+import {
+  BadRequestException,
+  Controller,
+  Post,
+  Body,
+  Get,
+  Query,
+  Res,
+  Param,
+  NotFoundException,
+} from '@nestjs/common';
+import { CampaignsService, FailedCampaign } from './campaigns.service';
 import { CredentialsApiService } from '../shared/credentials-api.service';
 import type { Response } from 'express';
 
 interface CampaignsBody {
   emailSnovio?: string;
   emailsSnovio?: string[];
-  startDate: string;
-  endDate: string;
+  startDate: string; // dd/mm/yyyy
+  endDate: string; // dd/mm/yyyy
 }
+
+const BR_DATE = /^\d{2}\/\d{2}\/\d{4}$/;
 
 @Controller('campaigns')
 export class CampaignsController {
@@ -28,124 +40,116 @@ export class CampaignsController {
 
   @Post()
   async getCampaigns(@Body() body: CampaignsBody) {
-    console.log('📥 Recebendo requisição para gerar relatório...');
-    
     const { emailSnovio, emailsSnovio, startDate, endDate } = body;
-    const selectedEmails: string[] = emailsSnovio?.length 
-      ? emailsSnovio 
-      : emailSnovio 
-      ? [emailSnovio] 
-      : [];
+    const selectedEmails: string[] = emailsSnovio?.length
+      ? emailsSnovio
+      : emailSnovio
+        ? [emailSnovio]
+        : [];
 
     if (!selectedEmails.length) {
-      throw new Error('Nenhum email Snovio informado');
+      throw new BadRequestException('Nenhum email Snovio informado');
     }
 
     if (!startDate || !endDate) {
-      throw new Error('Datas de início e fim são obrigatórias');
+      throw new BadRequestException('Datas de início e fim são obrigatórias');
     }
 
-    console.log(`🎯 Processando ${selectedEmails.length} cliente(s)...`);
-    
+    if (!BR_DATE.test(startDate) || !BR_DATE.test(endDate)) {
+      throw new BadRequestException('Datas devem estar no formato dd/mm/yyyy');
+    }
+
     const clients = await this.credentialsApiService.getActiveClients();
     const allData: any[] = [];
     const countsByEmail: Record<string, number> = {};
-    
-    // Processa clientes em PARALELO
-    const clientPromises = selectedEmails.map(async (email) => {
-      console.log(`\n🔍 Processando: ${email}`);
-      const client = clients.find((c) => c.emailSnovio === email);
-      
-      if (!client) {
-        console.warn(`⚠️ Cliente não encontrado: ${email}`);
-        return { data: [], counts: {} };
-      }
+    const failedCampaigns: Array<FailedCampaign & { clientEmail: string }> = [];
+    const failedClients: string[] = [];
 
-      try {
-        const accessToken = await this.campaignsService.getAccessToken(
-          client.clientId,
-          client.clientSecret,
-        );
-        
-        const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
-        console.log(`📊 ${email}: ${campaigns.length} campanhas`);
-        
-        if (campaigns.length === 0) {
-          return { data: [], counts: {} };
+    // Clientes em paralelo; a concorrência real é limitada pelo semáforo do CampaignsService.
+    const results = await Promise.all(
+      selectedEmails.map(async (email) => {
+        const client = clients.find((c) => c.emailSnovio === email);
+
+        if (!client) {
+          failedClients.push(email);
+          return [];
         }
-        
-        const emailsOpened = await this.campaignsService.getEmailsOpenedFast(
-          accessToken,
-          campaigns,
-          startDate,
-          endDate,
-        );
-        
-        console.log(`✅ ${email}: ${emailsOpened.length} aberturas`);
-        
-        const withClient = emailsOpened.map((item) => ({
-          clientEmail: client.emailSnovio,
-          ...item,
-        }));
-        
-        const clientCounts: Record<string, number> = {};
-        emailsOpened.forEach(item => {
-          const p = item.prospectEmail || '';
-          if (p) clientCounts[p] = (clientCounts[p] || 0) + 1;
-        });
-        
-        return { data: withClient, counts: clientCounts };
-        
-      } catch (err: any) {
-        console.error(`❌ Erro em ${email}:`, err.message);
-        return { data: [], counts: {} };
+
+        try {
+          const accessToken = await this.campaignsService.getAccessToken(
+            client.clientId,
+            client.clientSecret,
+          );
+          const campaigns = await this.campaignsService.getUserCampaigns(accessToken);
+          if (campaigns.length === 0) return [];
+
+          const { data, failedCampaigns: failed } =
+            await this.campaignsService.getEmailsOpenedFast(
+              accessToken,
+              campaigns,
+              startDate,
+              endDate,
+            );
+
+          failedCampaigns.push(...failed.map((f) => ({ ...f, clientEmail: email })));
+          return data.map((item) => ({ clientEmail: client.emailSnovio, ...item }));
+        } catch (err: any) {
+          console.error(`❌ Erro em ${email}:`, err.message);
+          failedClients.push(email);
+          return [];
+        }
+      }),
+    );
+
+    for (const rows of results) allData.push(...rows);
+
+    const uniqueProspects = new Set<string>();
+    for (const item of allData) {
+      const p = item.prospectEmail || '';
+      if (p) {
+        countsByEmail[p] = (countsByEmail[p] || 0) + 1;
+        uniqueProspects.add(p);
       }
-    });
-    
-    // CORREÇÃO: await está DENTRO da função async, então está correto
-    const results = await Promise.all(clientPromises);
-    
-    results.forEach(result => {
-      allData.push(...result.data);
-      Object.entries(result.counts).forEach(([email, count]) => {
-        countsByEmail[email] = (countsByEmail[email] || 0) + count;
-      });
-    });
-    
-    if (allData.length > 0) {
-      await this.campaignsService.saveToCsv(allData);
     }
-    
-    console.log(`🏁 Total de aberturas: ${allData.length}`);
-    
+
+    const reportId = await this.campaignsService.saveToCsv(allData);
+    const incomplete = failedClients.length > 0 || failedCampaigns.length > 0;
+
+    console.log(
+      `🏁 Relatório: ${selectedEmails.length} cliente(s), ${allData.length} aberturas, ` +
+        `${failedClients.length} cliente(s) e ${failedCampaigns.length} campanha(s) com falha.`,
+    );
+
     return {
       success: true,
       message: allData.length > 0 ? 'Relatório gerado!' : 'Nenhuma abertura',
       totalOpenings: allData.length,
+      uniqueProspects: uniqueProspects.size,
       countsByEmail,
       processedClients: selectedEmails.length,
+      reportId,
+      incomplete,
+      failedClients,
+      failedCampaigns,
     };
   }
 
   @Get('download')
-  async downloadCsv(@Res() res: Response) {
-    const filePath = this.campaignsService.getCsvFilePath();
-    const fileName = 'AberturasDeCampanhas.csv';
+  async downloadCsv(@Res() res: Response, @Query('id') id?: string) {
+    const filePath = this.campaignsService.getCsvFilePath(id);
+    if (!filePath) {
+      throw new NotFoundException('Relatório não encontrado ou expirado. Gere novamente.');
+    }
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-
-    return res.download(filePath, fileName);
+    return res.download(filePath, 'AberturasDeCampanhas.csv');
   }
 
   @Get('test/:emailSnovio')
   async testClient(@Param('emailSnovio') emailSnovio: string) {
-    console.log(`🧪 Testando: ${emailSnovio}`);
-    
     try {
-      const clients = await this.credentialsApiService.getActiveClients();
-      const client = clients.find(c => c.emailSnovio === emailSnovio);
-      
+      const client = await this.credentialsApiService.getClientByEmailSnovio(emailSnovio);
+
       if (!client) {
         return { success: false, message: 'Cliente não encontrado' };
       }
@@ -174,4 +178,3 @@ export class CampaignsController {
     }
   }
 }
-

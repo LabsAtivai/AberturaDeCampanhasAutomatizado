@@ -1,14 +1,14 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import * as mysql from 'mysql2/promise';
 
-interface SemanaInfo {
+export interface SemanaInfo {
   startDate: string;
   endDate: string;
   label: string;
   labelShort: string;
 }
 
-interface ClienteSemanal {
+export interface ClienteSemanal {
   cliente: string;
   tipo: 'LEGACY' | 'TRIAL_ATIVO' | 'TRIAL_EXPIRADO';
   total: number;

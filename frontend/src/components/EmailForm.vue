@@ -214,8 +214,19 @@ export default {
         });
 
         // CORREÇÃO: Removi a variável 'message' que não estava sendo usada
-        const { totalOpenings, countsByEmail } = res.data || {};
+        const { totalOpenings, countsByEmail, reportId, incomplete, failedClients, failedCampaigns } = res.data || {};
         this.totalOpenings = totalOpenings || 0;
+
+        if (incomplete) {
+          const parts = [];
+          if (failedClients && failedClients.length) {
+            parts.push(`${failedClients.length} cliente(s) falharam`);
+          }
+          if (failedCampaigns && failedCampaigns.length) {
+            parts.push(`${failedCampaigns.length} campanha(s) falharam`);
+          }
+          this.warningMessage = `Relatório possivelmente incompleto: ${parts.join(' e ')}. Tente novamente.`;
+        }
 
         const entries = Object.entries(countsByEmail || {});
         this.emailCounts = entries
@@ -234,6 +245,7 @@ export default {
           this.loadingText = 'Baixando CSV...';
 
           const file = await api.get('/api/campaigns/download', {
+            params: { id: reportId },
             responseType: 'blob',
           });
 
