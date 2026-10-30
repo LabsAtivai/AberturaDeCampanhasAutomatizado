@@ -145,6 +145,8 @@ export class CampaignsService implements OnModuleInit {
   constructor(private readonly credentialsApiService: CredentialsApiService) {}
 
   onModuleInit() {
+    // SKIP_STARTUP_COUNTS=true evita varrer todas as contas da Snov.io ao subir (ambiente local/testes).
+    if (process.env.SKIP_STARTUP_COUNTS === 'true') return;
     // Sem await: não atrasa a subida da aplicação.
     void this.refreshCampaignCounts();
   }
