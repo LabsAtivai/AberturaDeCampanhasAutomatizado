@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
+import { Agent as HttpsAgent } from 'https';
 import { CredentialsApiService } from '../shared/credentials-api.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { csvRow } from '../common/csv';
@@ -90,6 +91,12 @@ class RateWindow {
   }
 }
 
+// Reaproveita conexões TLS com a Snov.io (centenas de chamadas por relatório).
+const snovHttp = axios.create({ httpsAgent: new HttpsAgent({ keepAlive: true, maxSockets: 24 }) });
+
+// Snov.io bloqueia a conta por ~5 min após estourar o limite.
+const DEFAULT_BLOCK_MS = 5 * 60 * 1000;
+
 const BRT_OFFSET_MS = 3 * 60 * 60 * 1000; // America/Sao_Paulo = UTC-3 (sem horário de verão)
 
 interface EmailOpening {
@@ -109,6 +116,18 @@ export class CampaignsService implements OnModuleInit {
 
   // token → clientId, para aplicar o rate limit por conta.
   private readonly tokenOwner = new Map<string, string>();
+
+  // Segredos por clientId, para renovar o token ao receber 401 no meio de um relatório.
+  private readonly clientSecrets = new Map<string, string>();
+
+  // Pedidos de token em andamento (evita N pedidos simultâneos para a mesma conta).
+  private readonly tokenInFlight = new Map<string, Promise<string>>();
+
+  // clientId → instante até o qual a conta está bloqueada (429). Evita insistir e prolongar o bloqueio.
+  private readonly blockedUntil = new Map<string, number>();
+
+  // Lista de campanhas por conta; relatório e download pedem a mesma lista em sequência.
+  private readonly campaignsCache = new Map<string, { expiresAt: number; items: Campaign[] }>();
 
   private readonly snovLimiter = new Semaphore(12);
   private readonly accountRate = new RateWindow(55, 60 * 1000);
@@ -193,7 +212,7 @@ export class CampaignsService implements OnModuleInit {
           clients.slice(i, i + CHUNK).map(async (client) => {
             try {
               const accessToken = await this.getAccessToken(client.clientId, client.clientSecret);
-              const campaigns = await this.getUserCampaigns(accessToken);
+              const campaigns = await this.getUserCampaigns(accessToken, true);
               this.campaignCounts.set(client.emailSnovio, campaigns.length);
             } catch (err: any) {
               failures++;
@@ -211,40 +230,99 @@ export class CampaignsService implements OnModuleInit {
 
   // ── Snov.io ───────────────────────────────────────────────────────────────
 
-  // GET com limite por conta (60/min), concorrência global e retry (5xx/timeout).
-  private snovGet(url: string, accessToken: string, params?: Record<string, any>, timeout = 20000) {
-    return this.withRetry(async () => {
-      // Mesma chave do pedido de token: o limite é por conta, não por token (que renova a cada ~50 min).
-      await this.accountRate.acquire(this.tokenOwner.get(accessToken) ?? accessToken);
-      return this.snovLimiter.run(() =>
-        axios.get(url, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          params,
-          timeout,
-        }),
-      );
-    });
+  private isBlocked(clientId: string): number {
+    const until = this.blockedUntil.get(clientId) ?? 0;
+    return until > Date.now() ? until : 0;
+  }
+
+  private markBlocked(clientId: string, err: any) {
+    const retryAfter = Number(err?.response?.headers?.['retry-after']);
+    const ms = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : DEFAULT_BLOCK_MS;
+    this.blockedUntil.set(clientId, Date.now() + ms);
+    this.logger.warn(`Conta ${clientId} bloqueada pela Snov.io (429) por ${Math.round(ms / 1000)}s.`);
+  }
+
+  // GET com limite por conta (60/min), concorrência global, retry (5xx/timeout),
+  // renovação de token em 401 e bloqueio local da conta após 429.
+  private async snovGet(url: string, accessToken: string, params?: Record<string, any>, timeout = 20000) {
+    let token = accessToken;
+    let refreshed = false;
+
+    while (true) {
+      const clientId = this.tokenOwner.get(token) ?? token;
+      const until = this.isBlocked(clientId);
+      if (until) {
+        const err: any = new Error(`Conta bloqueada pela Snov.io até ${new Date(until).toISOString()}`);
+        err.response = { status: 429 };
+        throw err;
+      }
+
+      try {
+        return await this.withRetry(async () => {
+          // Mesma chave do pedido de token: o limite é por conta, não por token (que renova a cada ~50 min).
+          await this.accountRate.acquire(clientId);
+          return this.snovLimiter.run(() =>
+            snovHttp.get(url, { headers: { Authorization: `Bearer ${token}` }, params, timeout }),
+          );
+        });
+      } catch (err: any) {
+        const status = err?.response?.status;
+        if (status === 429) this.markBlocked(clientId, err);
+
+        // Token revogado/expirado antes dos 50 min: renova uma vez e repete.
+        const secret = this.clientSecrets.get(clientId);
+        if (status === 401 && !refreshed && secret) {
+          refreshed = true;
+          this.tokenCache.delete(clientId);
+          token = await this.getAccessToken(clientId, secret);
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   async getAccessToken(clientId: string, clientSecret: string): Promise<string> {
-    const cacheKey = clientId;
-    const cached = this.tokenCache.get(cacheKey);
+    const cached = this.tokenCache.get(clientId);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.token;
     }
 
+    const pending = this.tokenInFlight.get(clientId);
+    if (pending) return pending;
+
+    const request = this.requestToken(clientId, clientSecret).finally(() => {
+      this.tokenInFlight.delete(clientId);
+    });
+    this.tokenInFlight.set(clientId, request);
+    return request;
+  }
+
+  private async requestToken(clientId: string, clientSecret: string): Promise<string> {
+    if (this.isBlocked(clientId)) {
+      const err: any = new Error('Conta bloqueada pela Snov.io (429)');
+      err.response = { status: 429 };
+      throw err;
+    }
+
     this.logger.debug(`Obtendo token para clientId ${clientId}...`);
 
-    const { data } = await this.withRetry(async () => {
-      await this.accountRate.acquire(clientId);
-      return this.snovLimiter.run(() =>
-        axios.post(
-          'https://api.snov.io/v1/oauth/access_token',
-          { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret },
-          { headers: { 'Content-Type': 'application/json' }, timeout: 10000 },
-        ),
-      );
-    });
+    let data: any;
+    try {
+      ({ data } = await this.withRetry(async () => {
+        await this.accountRate.acquire(clientId);
+        return this.snovLimiter.run(() =>
+          snovHttp.post(
+            'https://api.snov.io/v1/oauth/access_token',
+            { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret },
+            { headers: { 'Content-Type': 'application/json' }, timeout: 10000 },
+          ),
+        );
+      }));
+    } catch (err: any) {
+      if (err?.response?.status === 429) this.markBlocked(clientId, err);
+      throw err;
+    }
 
     if (!data.access_token) {
       throw new Error('Snov.io não retornou access_token');
@@ -253,7 +331,8 @@ export class CampaignsService implements OnModuleInit {
     // Cache por 50 minutos (tokens duram ~1h)
     for (const [t, owner] of this.tokenOwner) if (owner === clientId) this.tokenOwner.delete(t);
     this.tokenOwner.set(data.access_token, clientId);
-    this.tokenCache.set(cacheKey, {
+    this.clientSecrets.set(clientId, clientSecret);
+    this.tokenCache.set(clientId, {
       token: data.access_token,
       expiresAt: Date.now() + 50 * 60 * 1000,
     });
@@ -261,7 +340,11 @@ export class CampaignsService implements OnModuleInit {
     return data.access_token;
   }
 
-  async getUserCampaigns(accessToken: string): Promise<Campaign[]> {
+  async getUserCampaigns(accessToken: string, forceRefresh = false): Promise<Campaign[]> {
+    const owner = this.tokenOwner.get(accessToken) ?? accessToken;
+    const cached = this.campaignsCache.get(owner);
+    if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.items;
+
     this.logger.debug('Obtendo campanhas...');
 
     // API correta conforme documentação: /v1/get-user-campaigns
@@ -287,6 +370,7 @@ export class CampaignsService implements OnModuleInit {
       .filter((c) => c.id);
 
     this.logger.log(`${campaigns.length} campanhas obtidas.`);
+    this.campaignsCache.set(owner, { expiresAt: Date.now() + this.openedCacheTtlMs, items: campaigns });
     return campaigns;
   }
 
