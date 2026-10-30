@@ -9,7 +9,7 @@ interface SemanaInfo {
   labelShort: string;
 }
 
-interface ClienteSemanal {
+export interface ClienteSemanal {
   cliente: string;
   tipo: 'LEGACY' | 'TRIAL_ATIVO' | 'TRIAL_EXPIRADO';
   total: number;
@@ -22,6 +22,7 @@ interface ClienteSemanal {
 @Injectable()
 export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
   private pool: mysql.Pool;
+  private clientesCache: { data: Array<{ cliente: string; total: number }>; expiresAt: number } | null = null;
 
   async onModuleInit() {
     this.pool = mysql.createPool({
@@ -81,7 +82,8 @@ export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
          CASE
            WHEN cl.id IS NULL THEN 'SEM_CADASTRO'
            WHEN cl.tipo = 'LEGACY' THEN 'LEGACY'
-           WHEN cl.tipo = 'TRIAL' AND cl.expires_at > NOW() THEN 'TRIAL_ATIVO'
+           -- trial sem expires_at (todos hoje) é tratado como ativo, não como LEGACY
+           WHEN cl.tipo = 'TRIAL' AND (cl.expires_at IS NULL OR cl.expires_at > NOW()) THEN 'TRIAL_ATIVO'
            WHEN cl.tipo = 'TRIAL' AND cl.expires_at <= NOW() THEN 'TRIAL_EXPIRADO'
            ELSE 'LEGACY'
          END AS tipo_interno,
@@ -154,7 +156,8 @@ export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
          CASE
            WHEN cl.id IS NULL THEN 'SEM_CADASTRO'
            WHEN cl.tipo = 'LEGACY' THEN 'LEGACY'
-           WHEN cl.tipo = 'TRIAL' AND cl.expires_at > NOW() THEN 'TRIAL_ATIVO'
+           -- trial sem expires_at (todos hoje) é tratado como ativo, não como LEGACY
+           WHEN cl.tipo = 'TRIAL' AND (cl.expires_at IS NULL OR cl.expires_at > NOW()) THEN 'TRIAL_ATIVO'
            WHEN cl.tipo = 'TRIAL' AND cl.expires_at <= NOW() THEN 'TRIAL_EXPIRADO'
            ELSE 'LEGACY'
          END AS tipo,
@@ -196,6 +199,9 @@ export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
    * Retorna ordenado pelo nome do cliente.
    */
   async listClientes(): Promise<Array<{ cliente: string; total: number }>> {
+    // GROUP BY na tabela inteira: cache curto evita repetir a cada abertura da tela.
+    if (this.clientesCache && this.clientesCache.expiresAt > Date.now()) return this.clientesCache.data;
+
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
       `SELECT cliente, COUNT(*) AS total
        FROM consultas
@@ -203,10 +209,12 @@ export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
        GROUP BY cliente
        ORDER BY cliente ASC`,
     );
-    return rows.map((r) => ({
+    const data = rows.map((r) => ({
       cliente: r.cliente as string,
       total: Number(r.total),
     }));
+    this.clientesCache = { data, expiresAt: Date.now() + 5 * 60 * 1000 };
+    return data;
   }
 
   /**

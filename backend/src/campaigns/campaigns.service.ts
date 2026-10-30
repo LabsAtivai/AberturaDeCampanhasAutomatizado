@@ -2,8 +2,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
 import { CredentialsApiService } from '../shared/credentials-api.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { csvRow } from '../common/csv';
 
-interface Campaign {
+export interface Campaign {
   id: string;
   name: string;
   createdAt: number | null; // epoch em segundos
@@ -30,14 +31,17 @@ class Semaphore {
 
   async run<T>(fn: () => Promise<T>): Promise<T> {
     if (this.active >= this.max) {
+      // O slot é repassado direto por quem libera (active não é decrementado nesse caso).
       await new Promise<void>((resolve) => this.queue.push(resolve));
+    } else {
+      this.active++;
     }
-    this.active++;
     try {
       return await fn();
     } finally {
-      this.active--;
-      this.queue.shift()?.();
+      const next = this.queue.shift();
+      if (next) next();
+      else this.active--;
     }
   }
 }
@@ -102,6 +106,9 @@ export class CampaignsService implements OnModuleInit {
 
   // Cache de tokens por clientId → { token, expiresAt }
   private readonly tokenCache = new Map<string, { token: string; expiresAt: number }>();
+
+  // token → clientId, para aplicar o rate limit por conta.
+  private readonly tokenOwner = new Map<string, string>();
 
   private readonly snovLimiter = new Semaphore(12);
   private readonly accountRate = new RateWindow(55, 60 * 1000);
@@ -207,7 +214,8 @@ export class CampaignsService implements OnModuleInit {
   // GET com limite por conta (60/min), concorrência global e retry (5xx/timeout).
   private snovGet(url: string, accessToken: string, params?: Record<string, any>, timeout = 20000) {
     return this.withRetry(async () => {
-      await this.accountRate.acquire(accessToken);
+      // Mesma chave do pedido de token: o limite é por conta, não por token (que renova a cada ~50 min).
+      await this.accountRate.acquire(this.tokenOwner.get(accessToken) ?? accessToken);
       return this.snovLimiter.run(() =>
         axios.get(url, {
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -228,7 +236,7 @@ export class CampaignsService implements OnModuleInit {
     this.logger.debug(`Obtendo token para clientId ${clientId}...`);
 
     const { data } = await this.withRetry(async () => {
-      await this.accountRate.acquire(`client:${clientId}`);
+      await this.accountRate.acquire(clientId);
       return this.snovLimiter.run(() =>
         axios.post(
           'https://api.snov.io/v1/oauth/access_token',
@@ -243,6 +251,8 @@ export class CampaignsService implements OnModuleInit {
     }
 
     // Cache por 50 minutos (tokens duram ~1h)
+    for (const [t, owner] of this.tokenOwner) if (owner === clientId) this.tokenOwner.delete(t);
+    this.tokenOwner.set(data.access_token, clientId);
     this.tokenCache.set(cacheKey, {
       token: data.access_token,
       expiresAt: Date.now() + 50 * 60 * 1000,

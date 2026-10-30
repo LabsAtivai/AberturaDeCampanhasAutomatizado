@@ -1,29 +1,25 @@
-FROM node:20-alpine
-
+# Etapa de build
+FROM node:20-alpine AS build
 WORKDIR /usr/src/app
 
-# Instala dependências de build
-RUN apk add --no-cache python3 make g++ git
-
-# Copia arquivos de configuração primeiro
 COPY package*.json ./
-COPY tsconfig*.json ./
-COPY nest-cli.json ./
+RUN npm ci
 
-# Instala dependências
-RUN npm install
-
-# Copia código fonte
+COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
+# Falha do build interrompe a imagem (antes era mascarada com "|| echo").
+RUN npm run build
 
-# Build da aplicação (com flag para ignorar warnings)
-RUN npm run build || echo "Build completed with warnings"
-
-# Limpa cache npm para reduzir tamanho
-RUN npm cache clean --force
-
+# Etapa de produção
+FROM node:20-alpine AS production
+WORKDIR /usr/src/app
 ENV NODE_ENV=production
 
-EXPOSE 3000
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-CMD ["npm", "run", "start:prod"]
+COPY --from=build /usr/src/app/dist ./dist
+
+USER node
+EXPOSE 3000
+CMD ["node", "dist/main"]

@@ -8,7 +8,6 @@ export interface CredentialClient {
   clientId: string;
   clientSecret: string;
   emailSnovio: string;
-  senha: string;
   totalCampaigns: number;
 }
 
@@ -18,6 +17,8 @@ export class CredentialsApiService {
 
   // Lista de contas + credenciais muda raramente; evita 1 + N chamadas a cada requisição.
   private readonly cacheTtlMs = 10 * 60 * 1000;
+  // Carga com falhas parciais é cacheada por pouco tempo, para a conta ausente voltar logo.
+  private readonly partialCacheTtlMs = 30 * 1000;
   private readonly credentialsConcurrency = 10;
   private cache: { clients: CredentialClient[]; expiresAt: number } | null = null;
   private inFlight: Promise<CredentialClient[]> | null = null;
@@ -63,10 +64,11 @@ export class CredentialsApiService {
     return data;
   }
 
-  private async loadActiveClients(): Promise<CredentialClient[]> {
+  private async loadActiveClients(): Promise<{ clients: CredentialClient[]; partial: boolean }> {
     const http = this.client();
     const accounts = await this.fetchActiveAccounts(http);
     const clients: CredentialClient[] = [];
+    let partial = false;
 
     // Busca credenciais em lotes paralelos (antes era sequencial: uma chamada por conta, em fila).
     for (let i = 0; i < accounts.length; i += this.credentialsConcurrency) {
@@ -81,11 +83,11 @@ export class CredentialsApiService {
               clientId: creds.snov_id,
               clientSecret: creds.snov_secret,
               emailSnovio: creds.snov_email,
-              senha: creds.snov_password,
               totalCampaigns: 0,
             };
           } catch (err: any) {
             this.logger.error(`Erro ao buscar credencial de ${account.email}: ${err.message}`);
+            partial = true;
             return null;
           }
         }),
@@ -93,11 +95,11 @@ export class CredentialsApiService {
       for (const r of results) if (r) clients.push(r);
     }
 
-    return clients.filter((c) => c.clientId && c.clientSecret && c.emailSnovio);
+    return { clients: clients.filter((c) => c.clientId && c.clientSecret && c.emailSnovio), partial };
   }
 
   // Substitui a antiga leitura da aba "aberturas" do Google Sheets.
-  // Retorna o mesmo formato consumido pelo resto do módulo: { email, clientId, clientSecret, emailSnovio, senha }
+  // Retorna o mesmo formato consumido pelo resto do módulo: { email, clientId, clientSecret, emailSnovio }
   async getActiveClients(forceRefresh = false): Promise<CredentialClient[]> {
     if (!forceRefresh && this.cache && this.cache.expiresAt > Date.now()) {
       return this.cache.clients;
@@ -106,8 +108,9 @@ export class CredentialsApiService {
     // Requisições simultâneas compartilham a mesma carga.
     if (!this.inFlight) {
       this.inFlight = this.loadActiveClients()
-        .then((clients) => {
-          this.cache = { clients, expiresAt: Date.now() + this.cacheTtlMs };
+        .then(({ clients, partial }) => {
+          const ttl = partial ? this.partialCacheTtlMs : this.cacheTtlMs;
+          this.cache = { clients, expiresAt: Date.now() + ttl };
           return clients;
         })
         .finally(() => {

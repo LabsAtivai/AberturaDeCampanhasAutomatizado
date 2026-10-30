@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger, BadRequestException } from '@nestjs/common';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/http-exception.filter';
 
@@ -7,6 +8,7 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
+  app.use(helmet());
   app.useGlobalFilters(new AllExceptionsFilter());
 
   app.useGlobalPipes(
@@ -18,7 +20,6 @@ async function bootstrap() {
         const messages = errors.flatMap((e) =>
           Object.values(e.constraints || {}),
         );
-        const { BadRequestException } = require('@nestjs/common');
         return new BadRequestException(messages);
       },
     }),
@@ -27,7 +28,6 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'https://aberturas.labsativa.com.br',
-      'http://aberturas.labsativa.com.br',
       'http://localhost:4173',
       'http://localhost:8080',
     ],

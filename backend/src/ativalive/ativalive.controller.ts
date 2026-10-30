@@ -1,18 +1,22 @@
 import { Controller, Post, Body, Res, Get, Logger, HttpCode, HttpStatus } from '@nestjs/common';
-import { IsArray, IsString, ArrayMinSize } from 'class-validator';
+import { IsArray, IsString, ArrayMinSize, ArrayMaxSize, Matches } from 'class-validator';
+import { csvRow } from '../common/csv';
 import { AtivaliveService } from './ativalive.service';
 import type { Response } from 'express';
 
 class ConsultasDto {
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(500)
   @IsString({ each: true })
   clientes: string[];
 
   @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'startDate deve estar no formato yyyy-mm-dd.' })
   startDate: string;
 
   @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'endDate deve estar no formato yyyy-mm-dd.' })
   endDate: string;
 }
 
