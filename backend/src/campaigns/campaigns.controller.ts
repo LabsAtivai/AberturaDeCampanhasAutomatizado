@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  Query,
 } from '@nestjs/common';
 import { CampaignsService, FailedCampaign } from './campaigns.service';
 import { CredentialsApiService } from '../shared/credentials-api.service';
@@ -25,8 +26,8 @@ export class CampaignsController {
   ) {}
 
   @Get('get-emails')
-  async getEmails() {
-    const clients = await this.credentialsApiService.getActiveClients();
+  async getEmails(@Query('refresh') refresh?: string) {
+    const clients = await this.credentialsApiService.getActiveClients(refresh === 'true');
     return clients.map((c) => ({
       emailSnovio: c.emailSnovio,
       email: c.email,

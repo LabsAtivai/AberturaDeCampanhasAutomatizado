@@ -15,8 +15,10 @@ export interface CredentialClient {
 export class CredentialsApiService {
   private readonly logger = new Logger(CredentialsApiService.name);
 
-  // Lista de contas + credenciais muda raramente; evita 1 + N chamadas a cada requisição.
-  private readonly cacheTtlMs = 10 * 60 * 1000;
+  // A lista de contas é reconsultada a cada minuto (cliente novo aparece logo);
+  // as credenciais só são buscadas de novo para contas novas ou alteradas (updated_at).
+  private readonly cacheTtlMs = 60 * 1000;
+  private readonly credentialsById = new Map<string, { updatedAt: string; client: CredentialClient }>();
   // Carga com falhas parciais é cacheada por pouco tempo, para a conta ausente voltar logo.
   private readonly partialCacheTtlMs = 30 * 1000;
   private readonly credentialsConcurrency = 10;
@@ -70,14 +72,22 @@ export class CredentialsApiService {
     const clients: CredentialClient[] = [];
     let partial = false;
 
-    // Busca credenciais em lotes paralelos (antes era sequencial: uma chamada por conta, em fila).
-    for (let i = 0; i < accounts.length; i += this.credentialsConcurrency) {
-      const batch = accounts.slice(i, i + this.credentialsConcurrency);
+    // Reaproveita credenciais já carregadas; busca só as de contas novas ou alteradas.
+    const toFetch: any[] = [];
+    for (const account of accounts) {
+      const known = this.credentialsById.get(account.id);
+      if (known && known.updatedAt === account.updated_at) clients.push(known.client);
+      else toFetch.push(account);
+    }
+
+    // Busca credenciais em lotes paralelos.
+    for (let i = 0; i < toFetch.length; i += this.credentialsConcurrency) {
+      const batch = toFetch.slice(i, i + this.credentialsConcurrency);
       const results = await Promise.all(
         batch.map(async (account): Promise<CredentialClient | null> => {
           try {
             const creds = await this.fetchCredentials(http, account.id);
-            return {
+            const client: CredentialClient = {
               id: account.id,
               email: account.email,
               clientId: creds.snov_id,
@@ -85,6 +95,8 @@ export class CredentialsApiService {
               emailSnovio: creds.snov_email,
               totalCampaigns: 0,
             };
+            this.credentialsById.set(account.id, { updatedAt: account.updated_at, client });
+            return client;
           } catch (err: any) {
             this.logger.error(`Erro ao buscar credencial de ${account.email}: ${err.message}`);
             partial = true;
@@ -95,7 +107,14 @@ export class CredentialsApiService {
       for (const r of results) if (r) clients.push(r);
     }
 
-    return { clients: clients.filter((c) => c.clientId && c.clientSecret && c.emailSnovio), partial };
+    // Esquece contas que saíram da lista (desativadas/removidas).
+    const activeIds = new Set(accounts.map((a) => a.id));
+    for (const id of this.credentialsById.keys()) if (!activeIds.has(id)) this.credentialsById.delete(id);
+
+    return {
+      clients: clients.filter((c) => c.clientId && c.clientSecret && c.emailSnovio),
+      partial,
+    };
   }
 
   // Substitui a antiga leitura da aba "aberturas" do Google Sheets.

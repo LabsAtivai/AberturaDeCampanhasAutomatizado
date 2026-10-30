@@ -50,7 +50,12 @@
             <button type="button" class="tag-remove" @click="removeEmail(e)" :aria-label="`Remover ${e}`">×</button>
           </span>
         </div>
-        <span class="helper">{{ selectedEmails.length }} selecionado(s)</span>
+        <span class="helper">
+          {{ selectedEmails.length }} selecionado(s) · {{ emailOptions.length }} contas
+          <button type="button" class="btn-secondary" :disabled="isLoading || isRefreshing" @click="loadEmails(true)">
+            {{ isRefreshing ? 'Atualizando...' : '↻ Atualizar lista' }}
+          </button>
+        </span>
       </div>
 
       <!-- DATAS -->
@@ -169,16 +174,12 @@ export default {
       countsByEmail: {},
       countsByCampaign: {},
       showStats: false,
+      isRefreshing: false,
     };
   },
 
   async mounted() {
-    try {
-      const res = await api.get('/api/campaigns/get-emails');
-      this.emailOptions = res.data || [];
-    } catch {
-      this.errorMessage = 'Não foi possível carregar a lista de emails Snov.io.';
-    }
+    await this.loadEmails();
   },
 
   computed: {
@@ -210,6 +211,19 @@ export default {
   methods: {
     getOptionValue(opt) {
       return typeof opt === 'string' ? opt : opt.emailSnovio;
+    },
+
+    // refresh=true força nova leitura das contas (cliente recém-cadastrado aparece na hora).
+    async loadEmails(refresh = false) {
+      this.isRefreshing = true;
+      try {
+        const res = await api.get('/api/campaigns/get-emails', { params: refresh ? { refresh: true } : {} });
+        this.emailOptions = res.data || [];
+      } catch {
+        this.errorMessage = 'Não foi possível carregar a lista de emails Snov.io.';
+      } finally {
+        this.isRefreshing = false;
+      }
     },
 
     removeEmail(e) {
