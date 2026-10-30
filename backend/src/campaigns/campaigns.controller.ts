@@ -29,6 +29,7 @@ export class CampaignsController {
     const clients = await this.credentialsApiService.getActiveClients();
     return clients.map((c) => ({
       emailSnovio: c.emailSnovio,
+      email: c.email,
       totalCampaigns: this.campaignsService.getCampaignCount(c.emailSnovio),
     }));
   }

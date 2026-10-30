@@ -115,7 +115,7 @@
           v-model="searchTerm"
           type="text"
           class="search-input"
-          placeholder="Digite para filtrar..."
+          placeholder="Digite nome ou email..."
           autocomplete="off"
           :disabled="isLoading || !clientOptions.length"
         />
@@ -130,7 +130,7 @@
           >
             <input type="checkbox" :value="opt.cliente" v-model="selectedClients" :disabled="isLoading" />
             <span>
-              <span class="ms-option-label">{{ opt.cliente }}</span>
+              <span class="ms-option-label">{{ opt.nome ? `${opt.nome} (${opt.cliente})` : opt.cliente }}</span>
               <span class="ms-option-sub">{{ opt.total }} consultas</span>
             </span>
           </label>
@@ -234,6 +234,7 @@
 
 <script>
 import api from '../api';
+import { matchesSearch } from '../utils/search';
 
 export default {
   name: 'AtivaliveForm',
@@ -278,9 +279,7 @@ export default {
 
   computed: {
     filteredOptions() {
-      const term = this.searchTerm.trim().toLowerCase();
-      if (!term) return this.clientOptions;
-      return this.clientOptions.filter((opt) => opt.cliente.toLowerCase().includes(term));
+      return this.clientOptions.filter((opt) => matchesSearch(this.searchTerm, [opt.nome, opt.cliente]));
     },
     totalConsultas() {
       return this.results.reduce((sum, r) => sum + r.total, 0);

@@ -47,7 +47,8 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
-  await app.listen(3000);
-  logger.log('Backend rodando em http://localhost:3000');
+  const port = Number(process.env.PORT) || 3000;
+  await app.listen(port);
+  logger.log(`Backend rodando na porta ${port}`);
 }
 bootstrap();

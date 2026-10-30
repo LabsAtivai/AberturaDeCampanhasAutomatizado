@@ -22,7 +22,10 @@ export interface ClienteSemanal {
 @Injectable()
 export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
   private pool: mysql.Pool;
-  private clientesCache: { data: Array<{ cliente: string; total: number }>; expiresAt: number } | null = null;
+  private clientesCache: {
+    data: Array<{ cliente: string; nome: string; tipo: string; total: number }>;
+    expiresAt: number;
+  } | null = null;
 
   async onModuleInit() {
     this.pool = mysql.createPool({
@@ -198,19 +201,25 @@ export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
    * junto com a contagem total de registros de cada um.
    * Retorna ordenado pelo nome do cliente.
    */
-  async listClientes(): Promise<Array<{ cliente: string; total: number }>> {
+  async listClientes(): Promise<Array<{ cliente: string; nome: string; tipo: string; total: number }>> {
     // GROUP BY na tabela inteira: cache curto evita repetir a cada abertura da tela.
     if (this.clientesCache && this.clientesCache.expiresAt > Date.now()) return this.clientesCache.data;
 
+    // Nome e tipo vêm do cadastro (junção por email, cadastro mais recente).
     const [rows] = await this.pool.execute<mysql.RowDataPacket[]>(
-      `SELECT cliente, COUNT(*) AS total
-       FROM consultas
-       WHERE cliente IS NOT NULL AND cliente != ''
-       GROUP BY cliente
-       ORDER BY cliente ASC`,
+      `SELECT c.cliente, cl.nome, cl.tipo, COUNT(*) AS total
+       FROM consultas c
+       LEFT JOIN (SELECT LOWER(TRIM(email)) AS em, MAX(id) AS mid FROM cliente GROUP BY LOWER(TRIM(email))) m
+              ON m.em = LOWER(TRIM(c.cliente))
+       LEFT JOIN cliente cl ON cl.id = m.mid
+       WHERE c.cliente IS NOT NULL AND c.cliente != ''
+       GROUP BY c.cliente, cl.nome, cl.tipo
+       ORDER BY c.cliente ASC`,
     );
     const data = rows.map((r) => ({
       cliente: r.cliente as string,
+      nome: (r.nome as string | null) ?? '',
+      tipo: (r.tipo as string | null) ?? '',
       total: Number(r.total),
     }));
     this.clientesCache = { data, expiresAt: Date.now() + 5 * 60 * 1000 };

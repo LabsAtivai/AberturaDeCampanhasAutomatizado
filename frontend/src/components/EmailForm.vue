@@ -10,7 +10,7 @@
           v-model="searchTerm"
           type="text"
           class="search-input"
-          placeholder="Digite para filtrar..."
+          placeholder="Digite o email Snov.io ou da conta..."
           autocomplete="off"
           :disabled="isLoading || !emailOptions.length"
           aria-controls="snovio-list"
@@ -150,6 +150,7 @@
 
 <script>
 import api from '../api';
+import { matchesSearch } from '../utils/search';
 
 export default {
   name: 'EmailForm',
@@ -182,12 +183,11 @@ export default {
 
   computed: {
     filteredOptions() {
-      const term = this.searchTerm.trim().toLowerCase();
-      if (!term) return this.emailOptions;
-      return this.emailOptions.filter((opt) => {
-        const email = typeof opt === 'string' ? opt : (opt.emailSnovio || '');
-        return email.toLowerCase().includes(term);
-      });
+      return this.emailOptions.filter((opt) =>
+        typeof opt === 'string'
+          ? matchesSearch(this.searchTerm, [opt])
+          : matchesSearch(this.searchTerm, [opt.emailSnovio, opt.email]),
+      );
     },
 
     campaignChartData() {
