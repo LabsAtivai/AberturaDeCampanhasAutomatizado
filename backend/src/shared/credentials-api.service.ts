@@ -11,6 +11,8 @@ export interface CredentialClient {
   totalCampaigns: number;
 }
 
+const CRAWL_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789._-';
+
 @Injectable()
 export class CredentialsApiService {
   private readonly logger = new Logger(CredentialsApiService.name);
@@ -24,6 +26,18 @@ export class CredentialsApiService {
   private readonly credentialsConcurrency = 10;
   private cache: { clients: CredentialClient[]; expiresAt: number } | null = null;
   private inFlight: Promise<CredentialClient[]> | null = null;
+
+  // A paginação de GET /api/accounts da snov-am-api é instável (repete contas e pula outras,
+  // pois a ordenação não tem desempate). Por isso as contas descobertas ficam acumuladas aqui,
+  // em vez de depender de uma única leitura completa da lista.
+  private readonly knownAccounts = new Map<string, any>();
+  private lastTotal = 0;
+  private crawling = false;
+  private lastCrawlAt = 0;
+  private readonly crawlMinGapMs = 10 * 60 * 1000;
+  private readonly crawlDelayMs = 800;
+  private readonly crawlMaxRequests = 300;
+  private readonly extraPageSizes = [89, 73];
 
   constructor(private readonly config: ConfigService) {}
 
@@ -44,21 +58,86 @@ export class CredentialsApiService {
     });
   }
 
-  private async fetchActiveAccounts(http: AxiosInstance) {
-    const accounts: any[] = [];
+  // Percorre a listagem paginada acumulando contas (dedupe por id). Retorna o total informado pela API.
+  private async pagePass(http: AxiosInstance, pageSize: number): Promise<number> {
     let page = 1;
-    const pageSize = 100;
+    let seen = 0;
+    let total = 0;
 
     while (true) {
       const { data } = await http.get('/api/accounts', {
         params: { status: 'ACTIVE', page, page_size: pageSize },
       });
-      accounts.push(...data.items);
-      if (accounts.length >= data.total || data.items.length === 0) break;
+      total = data.total;
+      for (const a of data.items) this.knownAccounts.set(a.id, a);
+      seen += data.items.length;
+      if (seen >= total || data.items.length === 0) break;
       page += 1;
     }
 
-    return accounts;
+    return total;
+  }
+
+  private async refreshAccounts(http: AxiosInstance) {
+    this.lastTotal = await this.pagePass(http, 100);
+
+    // Contas desativadas saem da lista conhecida (a lista de INACTIVE é pequena, uma página).
+    try {
+      const { data } = await http.get('/api/accounts', {
+        params: { status: 'INACTIVE', page: 1, page_size: 100 },
+      });
+      for (const a of data.items) this.knownAccounts.delete(a.id);
+    } catch (err: any) {
+      this.logger.warn(`Falha ao ler contas inativas: ${err.message}`);
+    }
+
+    // A paginação pula contas: tenta outros tamanhos de página antes do varrimento lento.
+    for (const size of this.extraPageSizes) {
+      if (this.knownAccounts.size >= this.lastTotal) break;
+      this.lastTotal = await this.pagePass(http, size);
+    }
+
+    if (this.knownAccounts.size < this.lastTotal) void this.crawlMissing(http);
+  }
+
+  // Varre a API com buscas curtas (q=), em ritmo lento e em segundo plano, até conhecer todas as contas.
+  // Cada busca com até 100 resultados vem completa numa única página (sem depender da paginação).
+  private async crawlMissing(http: AxiosInstance) {
+    if (this.crawling || Date.now() - this.lastCrawlAt < this.crawlMinGapMs) return;
+    this.crawling = true;
+    this.lastCrawlAt = Date.now();
+
+    const queue: string[] = [...CRAWL_ALPHABET];
+    let requests = 0;
+    const before = this.knownAccounts.size;
+
+    try {
+      while (queue.length && requests < this.crawlMaxRequests && this.knownAccounts.size < this.lastTotal) {
+        const term = queue.shift() as string;
+        const { data } = await http.get('/api/accounts', {
+          params: { status: 'ACTIVE', page: 1, page_size: 100, q: term },
+        });
+        requests++;
+
+        if (data.total <= 100) {
+          for (const a of data.items) this.knownAccounts.set(a.id, a);
+        } else if (term.length < 2) {
+          // Termo comum demais: refina com mais um caractere.
+          for (const c of CRAWL_ALPHABET) queue.push(term + c);
+        }
+        await new Promise((r) => setTimeout(r, this.crawlDelayMs));
+      }
+    } catch (err: any) {
+      // 429 ou indisponibilidade: tenta de novo na próxima janela.
+      this.logger.warn(`Varrimento de contas interrompido: ${err.message}`);
+    } finally {
+      this.crawling = false;
+      const found = this.knownAccounts.size - before;
+      this.logger.log(
+        `Varrimento de contas: +${found} (${this.knownAccounts.size}/${this.lastTotal}) em ${requests} chamadas.`,
+      );
+      if (found > 0) this.cache = null; // próxima leitura já inclui as contas novas
+    }
   }
 
   private async fetchCredentials(http: AxiosInstance, accountId: string) {
@@ -66,9 +145,8 @@ export class CredentialsApiService {
     return data;
   }
 
-  private async loadActiveClients(): Promise<{ clients: CredentialClient[]; partial: boolean }> {
-    const http = this.client();
-    const accounts = await this.fetchActiveAccounts(http);
+  private async buildClients(http: AxiosInstance): Promise<{ clients: CredentialClient[]; partial: boolean }> {
+    const accounts = [...this.knownAccounts.values()];
     const clients: CredentialClient[] = [];
     let partial = false;
 
@@ -107,14 +185,37 @@ export class CredentialsApiService {
       for (const r of results) if (r) clients.push(r);
     }
 
-    // Esquece contas que saíram da lista (desativadas/removidas).
-    const activeIds = new Set(accounts.map((a) => a.id));
-    for (const id of this.credentialsById.keys()) if (!activeIds.has(id)) this.credentialsById.delete(id);
+    // Esquece credenciais de contas que saíram da lista conhecida.
+    for (const id of this.credentialsById.keys()) {
+      if (!this.knownAccounts.has(id)) this.credentialsById.delete(id);
+    }
 
     return {
       clients: clients.filter((c) => c.clientId && c.clientSecret && c.emailSnovio),
       partial,
     };
+  }
+
+  private async loadActiveClients(): Promise<{ clients: CredentialClient[]; partial: boolean }> {
+    const http = this.client();
+    await this.refreshAccounts(http);
+    return this.buildClients(http);
+  }
+
+  // Busca contas por trecho do email (q=) e as inclui na lista. Cobre contas que a paginação não entrega.
+  async searchAccounts(term: string): Promise<CredentialClient[]> {
+    const q = term.trim();
+    if (q.length < 3) return [];
+
+    const http = this.client();
+    const { data } = await http.get('/api/accounts', {
+      params: { status: 'ACTIVE', page: 1, page_size: 100, q },
+    });
+    for (const a of data.items) this.knownAccounts.set(a.id, a);
+
+    const { clients } = await this.buildClients(http);
+    this.cache = { clients, expiresAt: Date.now() + this.cacheTtlMs };
+    return clients;
   }
 
   // Substitui a antiga leitura da aba "aberturas" do Google Sheets.

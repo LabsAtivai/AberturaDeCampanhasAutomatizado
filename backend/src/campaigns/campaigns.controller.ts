@@ -26,7 +26,9 @@ export class CampaignsController {
   ) {}
 
   @Get('get-emails')
-  async getEmails(@Query('refresh') refresh?: string) {
+  async getEmails(@Query('refresh') refresh?: string, @Query('search') search?: string) {
+    // search: inclui contas que a listagem paginada da API de credenciais não entrega.
+    if (search) await this.credentialsApiService.searchAccounts(search);
     const clients = await this.credentialsApiService.getActiveClients(refresh === 'true');
     return clients.map((c) => ({
       emailSnovio: c.emailSnovio,

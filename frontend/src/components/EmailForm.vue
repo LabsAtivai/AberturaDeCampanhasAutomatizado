@@ -182,6 +182,18 @@ export default {
     await this.loadEmails();
   },
 
+  watch: {
+    // Conta que a listagem não trouxe: busca direto na API de credenciais pelo trecho digitado.
+    searchTerm(term) {
+      clearTimeout(this.searchTimer);
+      const value = term.trim();
+      if (value.length < 3) return;
+      this.searchTimer = setTimeout(() => {
+        if (!this.filteredOptions.length && !this.isRefreshing) this.loadEmails(false, value);
+      }, 500);
+    },
+  },
+
   computed: {
     filteredOptions() {
       return this.emailOptions.filter((opt) =>
@@ -214,10 +226,13 @@ export default {
     },
 
     // refresh=true força nova leitura das contas (cliente recém-cadastrado aparece na hora).
-    async loadEmails(refresh = false) {
+    async loadEmails(refresh = false, search = '') {
       this.isRefreshing = true;
       try {
-        const res = await api.get('/api/campaigns/get-emails', { params: refresh ? { refresh: true } : {} });
+        const params = {};
+        if (refresh) params.refresh = true;
+        if (search) params.search = search;
+        const res = await api.get('/api/campaigns/get-emails', { params });
         this.emailOptions = res.data || [];
       } catch {
         this.errorMessage = 'Não foi possível carregar a lista de emails Snov.io.';
