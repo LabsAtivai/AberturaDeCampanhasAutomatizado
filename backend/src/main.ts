@@ -8,6 +8,8 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
+  // Atrás do proxy (openresty): o throttler precisa do IP real do cliente, não o do proxy.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.use(helmet());
   app.useGlobalFilters(new AllExceptionsFilter());
 
