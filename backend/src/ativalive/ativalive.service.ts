@@ -91,7 +91,9 @@ export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
          DATE_FORMAT(MIN(c.horario), '%d/%m/%Y') AS primeiraConsulta,
          DATE_FORMAT(MAX(c.horario), '%d/%m/%Y') AS ultimaConsulta
        FROM consultas c
-       LEFT JOIN cliente cl ON cl.nome = c.cliente
+       LEFT JOIN (SELECT LOWER(TRIM(email)) AS em, MAX(id) AS mid FROM cliente GROUP BY LOWER(TRIM(email))) m
+              ON m.em = LOWER(TRIM(c.cliente))
+       LEFT JOIN cliente cl ON cl.id = m.mid
        WHERE c.horario BETWEEN ? AND ?
          AND c.cliente IS NOT NULL AND c.cliente != ''
        GROUP BY c.cliente, cl.id, cl.tipo, cl.expires_at
@@ -150,7 +152,7 @@ export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
       `SELECT
          c.cliente,
          CASE
-           WHEN cl.id IS NULL THEN 'LEGACY'
+           WHEN cl.id IS NULL THEN 'SEM_CADASTRO'
            WHEN cl.tipo = 'LEGACY' THEN 'LEGACY'
            WHEN cl.tipo = 'TRIAL' AND cl.expires_at > NOW() THEN 'TRIAL_ATIVO'
            WHEN cl.tipo = 'TRIAL' AND cl.expires_at <= NOW() THEN 'TRIAL_EXPIRADO'
@@ -162,7 +164,9 @@ export class AtivaliveService implements OnModuleInit, OnModuleDestroy {
          c.gastou_api,
          cl.expires_at
        FROM consultas c
-       LEFT JOIN cliente cl ON cl.nome = c.cliente
+       LEFT JOIN (SELECT LOWER(TRIM(email)) AS em, MAX(id) AS mid FROM cliente GROUP BY LOWER(TRIM(email))) m
+              ON m.em = LOWER(TRIM(c.cliente))
+       LEFT JOIN cliente cl ON cl.id = m.mid
        WHERE c.horario BETWEEN ? AND ?
          AND c.cliente IS NOT NULL AND c.cliente != ''
        ORDER BY c.horario DESC`,
